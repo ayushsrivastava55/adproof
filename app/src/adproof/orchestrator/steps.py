@@ -612,6 +612,7 @@ def run_evaluation(session: Session, job: ProcessingJob) -> None:
                     start_seconds=item.start_seconds,
                     end_seconds=item.end_seconds,
                     provider_score=item.provider_score,
+                    text=item.text,
                 )
                 counted.append(ev)
                 by_slot.setdefault(slot, []).append(ev)

@@ -169,7 +169,7 @@ class EvidenceRole(StrEnum):
 RETRIEVAL_PLAN_VERSION = "retrieval-plan/v1"
 EVALUATOR_VERSION = "evaluator/v1"
 CONFIDENCE_MODEL_VERSION = "provider-score-banding/v1-uncalibrated"
-VISUAL_INDEX_PROMPT_VERSION = "visual-index-prompt/v1"
+VISUAL_INDEX_PROMPT_VERSION = "visual-index-prompt/v2-marker"
 
 
 class Role(StrEnum):

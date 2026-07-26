@@ -42,6 +42,9 @@ class CountedEvidence:
     start_seconds: float
     end_seconds: float | None
     provider_score: float | None
+    #: Scene description or transcript text, used only by deterministic
+    #: token checks. Never interpreted, never summarised.
+    text: str | None = None
 
 
 @dataclass(frozen=True)
@@ -348,9 +351,16 @@ def evaluate_forbidden_occurrence(
     evidence: list[CountedEvidence],
     coverage: Coverage,
     absence_policy: AbsencePolicy,
-    min_confidence: ConfidenceBand = ConfidenceBand.medium,
+    min_confidence: ConfidenceBand = ConfidenceBand.high,
 ) -> EvaluationOutcome:
     """Fail when a prohibited thing is found. Used for claims and competitors.
+
+    The confidence floor is HIGH by design. Observed on a real 1960 commercial:
+    the query "a competing brand of breakfast cereal" returned a rocket on a
+    launch pad at 0.579, above a medium floor. Semantic scene search always
+    returns its best-ranked matches whether or not anything matches, so a
+    medium score is not evidence a prohibited thing is present. Accusing a
+    creator on that basis is the worst failure mode this product has.
 
     The asymmetry matters. For a FORBIDDEN rule, finding nothing is the good
     outcome, so an empty result is a `pass` rather than an absence problem.
@@ -677,6 +687,31 @@ def evaluate_sequence(
     )
 
 
+#: Marker the disclosure index is instructed to emit when it actually sees
+#: disclosure text. A marker beats keyword matching because keyword matching
+#: cannot distinguish "I see an ad" from "I do not see an ad" -- observed on a
+#: real commercial, where the model quoted the prompt's own word list inside a
+#: negation and made every frame look like a disclosure.
+DISCLOSURE_FOUND_MARKER = "disclosure_found"
+DISCLOSURE_ABSENT_MARKER = "disclosure_absent"
+
+
+def _declares_disclosure(text: str | None) -> bool:
+    """Did the index REPORT a disclosure, as opposed to ranking near one?
+
+    Deterministic. Reads the marker the prompt demands, and requires the
+    absent-marker not to be present. Anything ambiguous counts as absent, which
+    is the safe direction: a missed disclosure routes to a human, a fabricated
+    one silently passes a compliance rule.
+    """
+    if not text:
+        return False
+    lowered = text.lower()
+    if DISCLOSURE_ABSENT_MARKER in lowered:
+        return False
+    return DISCLOSURE_FOUND_MARKER in lowered
+
+
 def evaluate_disclosure(
     *,
     requirement_text: str,
@@ -700,7 +735,12 @@ def evaluate_disclosure(
         return [e for e in items if start <= e.start_seconds <= end]
 
     spoken = in_window(spoken_evidence)
-    visual = in_window(visual_evidence)
+    # A visual "disclosure" hit whose description never mentions a disclosure
+    # word is a ranking artefact, not evidence. Retrieval proposes; this
+    # deterministic check decides whether it counts.
+    visual = [
+        e for e in in_window(visual_evidence) if _declares_disclosure(e.text)
+    ]
     window_note = (
         f" within {window[0]:g}s to {window[1]:g}s" if window else ""
     )

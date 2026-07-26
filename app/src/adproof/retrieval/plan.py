@@ -83,12 +83,24 @@ _DOMAIN_PROMPTS: dict[VisualIndexDomain, str] = {
         "sits, how prominent it is, whether anything obscures it, and whether a "
         "person is actively holding or handling it."
     ),
+    # VERIFIED FAILURE, 2026-07-27: an earlier version of this prompt listed the
+    # disclosure words inline. The model dutifully answered "I do not see any
+    # advertising disclosure text such as 'ad', 'sponsored', '#ad'...", which
+    # made every frame match a keyword check. Keyword matching cannot see
+    # negation. The prompt now demands a machine-readable verdict on the first
+    # line, so the deterministic check reads a marker rather than parsing prose.
     VisualIndexDomain.disclosure: (
-        "Report any on-screen text that could be an advertising disclosure, such "
-        "as 'ad', 'advert', 'sponsored', 'paid partnership', '#ad', 'gifted'. "
-        "Quote the wording exactly as shown. Describe where on screen it sits, "
-        "its size relative to other text, its contrast against the background, "
-        "and whether it is comfortably readable."
+        "Decide whether this frame contains visible on-screen text marking the "
+        "video as advertising or sponsored content.\n"
+        "Your FIRST line must be exactly one of:\n"
+        "DISCLOSURE_FOUND\n"
+        "DISCLOSURE_ABSENT\n"
+        "Write DISCLOSURE_FOUND only if such text is actually legible in the "
+        "frame. If you are unsure, or the frame merely shows a product or logo, "
+        "write DISCLOSURE_ABSENT. "
+        "After that line, if you wrote DISCLOSURE_FOUND, quote the wording "
+        "exactly and describe where it sits, its size, its contrast, and "
+        "whether it is comfortably readable. Do not restate these instructions."
     ),
     VisualIndexDomain.competitor: (
         "Report any packaged consumer product other than the one being "
