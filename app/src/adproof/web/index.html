@@ -1,0 +1,264 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>AdProof — campaign verification</title>
+<link rel="stylesheet" href="/static/styles.css" />
+</head>
+<body>
+
+<!-- ── login ────────────────────────────────────────────────────────────── -->
+<div id="login-view" class="login-view" hidden>
+  <form id="login-form" class="login-card" autocomplete="on">
+    <div class="brand"><span class="brand-mark">▮</span> AdProof</div>
+    <p class="login-sub">Evidence-first campaign verification</p>
+    <label for="login-email">Email</label>
+    <input id="login-email" type="email" name="email" required autocomplete="username" />
+    <label for="login-password">Password</label>
+    <input id="login-password" type="password" name="password" required
+           autocomplete="current-password" />
+    <button type="submit" class="btn btn-primary btn-block">Sign in</button>
+    <p id="login-error" class="alert alert-error" hidden></p>
+    <p class="login-note">
+      Accounts are provisioned by an administrator. There is no self-service
+      signup in this build.
+    </p>
+  </form>
+</div>
+
+<!-- ── app ──────────────────────────────────────────────────────────────── -->
+<div id="app-view" hidden>
+  <header class="topbar">
+    <div class="brand"><span class="brand-mark">▮</span> AdProof</div>
+    <nav class="tabs">
+      <button class="tab active" data-view="review">Review queue</button>
+      <button class="tab" data-view="campaigns">Campaigns</button>
+      <button class="tab" data-view="analytics">Analytics</button>
+    </nav>
+    <div class="topbar-right">
+      <span id="integrity-badge" class="badge badge-unknown">checking…</span>
+      <span id="who" class="who"></span>
+      <button id="logout" class="btn btn-quiet">Sign out</button>
+    </div>
+  </header>
+
+  <div id="disclosure" class="disclosure" hidden>
+    <button id="disclosure-toggle" class="disclosure-toggle">
+      What this build does and does not do ▾
+    </button>
+    <ul id="disclosure-list" hidden></ul>
+  </div>
+
+  <!-- review -->
+  <main id="view-review" class="view">
+    <section class="panel sidebar">
+      <div class="panel-head">
+        <h2>Submissions</h2>
+        <button id="new-submission" class="btn btn-small">+ New</button>
+      </div>
+      <ul id="submission-list" class="submission-list"></ul>
+      <p id="submissions-empty" class="empty" hidden>
+        No submissions yet. Create a campaign with requirements, then submit a
+        creator video to verify against it.
+      </p>
+    </section>
+
+    <section class="panel" id="report-panel">
+      <p id="report-placeholder" class="empty placeholder">
+        Select a submission to see its requirements, evidence, and processing state.
+      </p>
+
+      <div id="report-body" hidden>
+        <div class="report-header">
+          <div>
+            <h2 id="report-title">Submission</h2>
+            <p id="report-sub" class="muted"></p>
+          </div>
+          <span id="submission-state" class="state-chip"></span>
+          <button id="retry-btn" class="btn" hidden>Retry failed stages</button>
+        </div>
+
+        <div id="submission-error" class="alert alert-error" hidden></div>
+
+        <h3>Processing</h3>
+        <p class="note">
+          Stage state is AdProof's own job state. VideoDB exposes no
+          index-progress signal to this SDK version, so no percentage is shown.
+        </p>
+        <ul id="stages" class="stages"></ul>
+
+        <h3>Media</h3>
+        <div id="media-info" class="media-info"></div>
+        <video id="player" controls playsinline preload="metadata"></video>
+        <p id="player-note" class="note"></p>
+
+        <h3>Decision</h3>
+        <div id="adjudication-slot"></div>
+
+        <h3>Requirements</h3>
+        <div id="rules"></div>
+      </div>
+    </section>
+  </main>
+
+  <!-- analytics -->
+  <main id="view-analytics" class="view view-single" hidden>
+    <section class="panel">
+      <div class="panel-head">
+        <h2>Campaign analytics</h2>
+        <select id="analytics-campaign" class="inline-select"></select>
+      </div>
+      <div id="analytics-body"></div>
+    </section>
+  </main>
+
+  <!-- campaigns -->
+  <main id="view-campaigns" class="view" hidden>
+    <section class="panel sidebar">
+      <div class="panel-head">
+        <h2>Campaigns</h2>
+        <button id="new-campaign" class="btn btn-small">+ New</button>
+      </div>
+      <ul id="campaign-list" class="submission-list"></ul>
+      <p id="campaigns-empty" class="empty" hidden>
+        No campaigns yet. A campaign holds the confirmed requirements that
+        submissions are verified against.
+      </p>
+    </section>
+    <section class="panel">
+      <h2>How verification works</h2>
+      <ol class="how">
+        <li><strong>Define requirements.</strong> Each becomes a structured rule with an explicit threshold and absence policy.</li>
+        <li><strong>Confirm the rule set.</strong> Rules are immutable once confirmed, and every result cites the version used.</li>
+        <li><strong>Submit a video.</strong> AdProof ingests it, builds a spoken index and one focused visual index per visual rule.</li>
+        <li><strong>Retrieve evidence.</strong> Each rule runs versioned searches for supporting <em>and</em> conflicting moments.</li>
+        <li><strong>Measure deterministically.</strong> Durations, counts, and thresholds are computed in code — never by a language model.</li>
+        <li><strong>Review.</strong> Open any finding at its exact timestamp, with full provenance.</li>
+      </ol>
+      <p class="note">
+        Only two rule types are implemented: required spoken phrase, and
+        minimum visual duration. Subjective requirements are routed to human
+        review and are never machine-scored.
+      </p>
+    </section>
+  </main>
+</div>
+
+<!-- ── modals ───────────────────────────────────────────────────────────── -->
+<dialog id="campaign-dialog" class="dialog dialog-wide">
+  <form id="campaign-form" method="dialog">
+    <h3>New campaign</h3>
+    <label>Campaign name<input name="campaign_name" required /></label>
+    <label>Campaign brief (kept verbatim as an audit artifact)
+      <textarea name="brief_text" rows="3" required></textarea></label>
+
+    <div class="rules-head">
+      <span>Requirements</span>
+      <button type="button" id="add-rule" class="btn btn-small">+ Add requirement</button>
+    </div>
+    <div id="rule-rows"></div>
+    <p class="note">
+      Subjective requirements are always routed to a person and never machine
+      scored. Absence policy decides what a "no match" is allowed to conclude.
+    </p>
+
+    <p id="campaign-error" class="alert alert-error" hidden></p>
+    <div class="dialog-actions">
+      <button type="button" class="btn" data-close>Cancel</button>
+      <button type="submit" class="btn btn-primary">Create and confirm rules</button>
+    </div>
+  </form>
+</dialog>
+
+<dialog id="submission-dialog" class="dialog">
+  <form id="submission-form" method="dialog">
+    <h3>New submission</h3>
+    <label>Campaign<select name="campaign_id" required></select></label>
+    <label>Creator reference<input name="creator_reference" required placeholder="creator-001" /></label>
+    <label>Video URL (must be publicly fetchable by VideoDB)
+      <input name="source_url" type="url" required placeholder="https://…/video.mp4" /></label>
+    <p class="note">
+      Processing is metered by VideoDB. Visual indexing samples a frame every
+      2 seconds, so cost and time scale with video length.
+    </p>
+    <p id="submission-error" class="alert alert-error" hidden></p>
+    <div class="dialog-actions">
+      <button type="button" class="btn" data-close>Cancel</button>
+      <button type="submit" class="btn btn-primary">Submit for verification</button>
+    </div>
+  </form>
+</dialog>
+
+<dialog id="override-dialog" class="dialog">
+  <form id="override-form" method="dialog">
+    <h3>Override this result</h3>
+    <p class="note">
+      The machine result is kept on record unchanged. This adds your conclusion
+      alongside it, attributed to you.
+    </p>
+    <label>Your conclusion
+      <select name="human_state" required>
+        <option value="pass">Pass</option>
+        <option value="fail">Fail</option>
+        <option value="uncertain">Uncertain</option>
+        <option value="human_review_required">Needs specialist review</option>
+      </select>
+    </label>
+    <label>Why the machine result was wrong
+      <select name="reason_category" required>
+        <option value="false_negative">False negative — it missed something that is there</option>
+        <option value="false_positive">False positive — it flagged something that isn't there</option>
+        <option value="insufficient_evidence">Insufficient evidence to decide</option>
+        <option value="wrong_timestamp">Wrong timestamp</option>
+        <option value="wrong_rule_interpretation">Rule interpreted incorrectly</option>
+        <option value="unsupported_rule">Rule cannot be automated reliably</option>
+        <option value="policy_disagreement">Disagree with the policy outcome</option>
+      </select>
+    </label>
+    <label>Explanation (required)
+      <textarea name="reason_text" rows="3" required
+        placeholder="What did you see, and where?"></textarea></label>
+    <p id="override-error" class="alert alert-error" hidden></p>
+    <div class="dialog-actions">
+      <button type="button" class="btn" data-close>Cancel</button>
+      <button type="submit" class="btn btn-primary">Record override</button>
+    </div>
+  </form>
+</dialog>
+
+<dialog id="decision-dialog" class="dialog">
+  <form id="decision-form" method="dialog">
+    <h3 id="decision-title">Decide</h3>
+    <label>Rationale (required, recorded permanently)
+      <textarea name="rationale" rows="3" required></textarea></label>
+    <p id="decision-error" class="alert alert-error" hidden></p>
+    <div class="dialog-actions">
+      <button type="button" class="btn" data-close>Cancel</button>
+      <button type="submit" class="btn btn-primary">Record decision</button>
+    </div>
+  </form>
+</dialog>
+
+<dialog id="revision-dialog" class="dialog dialog-wide">
+  <form id="revision-form" method="dialog">
+    <h3>Request changes</h3>
+    <p class="note">
+      Drafted from the rules and the evidence. Nothing here asserts a fact the
+      evidence does not support. Edit before sending.
+    </p>
+    <label>Message to the creator
+      <textarea name="message" rows="12" required></textarea></label>
+    <div id="revision-excluded"></div>
+    <p id="revision-error" class="alert alert-error" hidden></p>
+    <div class="dialog-actions">
+      <button type="button" class="btn" data-close>Cancel</button>
+      <button type="submit" class="btn btn-primary">Record and request changes</button>
+    </div>
+  </form>
+</dialog>
+
+<script src="https://cdn.jsdelivr.net/npm/hls.js@1.5.17/dist/hls.min.js"></script>
+<script src="/static/app.js"></script>
+</body>
+</html>

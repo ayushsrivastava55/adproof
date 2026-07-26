@@ -1,0 +1,38 @@
+{
+  "name": "AdProof Product Documentation",
+  "type": "documentation-only",
+  "contains_code": false,
+  "files": [
+    ".claude/agents/security-reviewer.md",
+    ".claude/agents/verification-quality-reviewer.md",
+    ".claude/agents/videodb-reviewer.md",
+    ".claude/commands/integrity-review.md",
+    ".claude/commands/plan-next-slice.md",
+    ".claude/rules/documentation.md",
+    ".claude/rules/external-integrations.md",
+    ".claude/rules/product-integrity.md",
+    "CLAUDE.md",
+    "README.md",
+    "docs/API_AND_EVENTS.md",
+    "docs/CLAUDE_CODE_OPERATING_GUIDE.md",
+    "docs/DATA_MODEL.md",
+    "docs/DECISIONS_AND_OPEN_QUESTIONS.md",
+    "docs/DELIVERY_ROADMAP.md",
+    "docs/DEMO_DATA_SPEC.md",
+    "docs/PRD.md",
+    "docs/PRODUCT_PRINCIPLES.md",
+    "docs/QUALITY_AND_EVALUATION.md",
+    "docs/SECURITY_AND_PRIVACY.md",
+    "docs/SYSTEM_ARCHITECTURE.md",
+    "docs/USER_JOURNEYS.md",
+    "docs/UX_SPEC.md",
+    "docs/VERIFICATION_ENGINE.md",
+    "docs/VIDEODB_INTEGRATION.md"
+  ],
+  "official_sources": [
+    "https://docs.videodb.io/",
+    "https://docs.videodb.io/llms.txt",
+    "https://docs.anthropic.com/en/docs/claude-code/overview",
+    "https://docs.anthropic.com/en/docs/about-claude/models/overview"
+  ]
+}

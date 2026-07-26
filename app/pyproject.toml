@@ -1,0 +1,33 @@
+[project]
+name = "adproof"
+version = "0.1.0"
+description = "AdProof - Phase 1 vertical slice: real VideoDB ingestion, indexing, retrieval, deterministic evaluation, timestamped review."
+requires-python = ">=3.12"
+dependencies = [
+    # Pinned exactly. The SDK surface was verified by source introspection against
+    # this version; see docs/VIDEODB_VERIFIED_BEHAVIOR.md. Do not float this pin
+    # without re-running scripts/verify_videodb_spike.py.
+    "videodb==0.5.1",
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.32",
+    "sqlalchemy>=2.0",
+    "psycopg[binary]>=3.2",
+    "pydantic>=2.9",
+    "python-dotenv>=1.0",
+    "httpx>=0.27",
+    "cryptography>=43",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.3"]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]

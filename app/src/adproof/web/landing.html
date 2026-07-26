@@ -1,0 +1,370 @@
+<!DOCTYPE html>
+<html lang="en" class="scroll-smooth">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AdProof - Proof the brief was followed</title>
+<meta name="description" content="AdProof checks creator videos against agreed campaign requirements and returns the timestamped moment behind every result.">
+<meta property="og:title" content="AdProof">
+<meta property="og:description" content="Timestamped evidence for every campaign requirement. Deterministic measurement, honest uncertainty, full audit trail.">
+<meta property="og:type" content="website">
+<meta name="twitter:card" content="summary_large_image">
+
+<script src="https://cdn.tailwindcss.com"></script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=Geist+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://unpkg.com/@phosphor-icons/web@2.1.1/src/regular/style.css">
+
+<script>
+tailwind.config = {
+  darkMode: 'class',
+  theme: {
+    extend: {
+      fontFamily: { sans: ['Geist','sans-serif'], mono: ['"Geist Mono"','monospace'] },
+      colors: {
+        // Single accent, locked for the whole page. Deep desaturated green:
+        // reads as "verified" without the AI-purple/blue-glow default.
+        accent: { DEFAULT: '#0F7A5A', hover: '#0C6349', soft: '#E6F2ED' },
+      },
+      borderRadius: { DEFAULT: '12px', lg: '12px', xl: '12px', '2xl': '12px' },
+      maxWidth: { shell: '1200px' },
+    }
+  }
+}
+</script>
+
+<style>
+/* One radius scale (12px), one accent, one neutral family (zinc). */
+:root {
+  --bg:#FBFBFA; --surface:#FFFFFF; --text:#18181B; --text-2:#52525B;
+  --line:#E4E4E7; --accent:#0F7A5A; --accent-soft:#E6F2ED;
+}
+.dark {
+  --bg:#0C0C0D; --surface:#151517; --text:#FAFAFA; --text-2:#A1A1AA;
+  --line:#26262A; --accent:#3FBF93; --accent-soft:#12251E;
+}
+body { background:var(--bg); color:var(--text); font-family:Geist, sans-serif; -webkit-font-smoothing:antialiased; }
+.surface { background:var(--surface); border:1px solid var(--line); }
+.hair { border-color:var(--line); }
+.t2 { color:var(--text-2); }
+.acc { color:var(--accent); }
+
+.reveal { opacity:0; transform:translateY(18px); transition:opacity .7s cubic-bezier(.16,1,.3,1), transform .7s cubic-bezier(.16,1,.3,1); }
+.reveal.in { opacity:1; transform:none; }
+@media (prefers-reduced-motion: reduce) {
+  .reveal { opacity:1; transform:none; transition:none; }
+  html { scroll-behavior:auto; }
+}
+
+.btn { border-radius:12px; transition:transform .15s ease, background-color .15s ease; }
+.btn:active { transform:translateY(1px); }
+.btn-primary { background:var(--accent); color:#fff; }
+.btn-primary:hover { background:#0C6349; }
+.dark .btn-primary:hover { background:#57D3A7; }
+.btn-ghost { border:1px solid var(--line); color:var(--text); }
+.btn-ghost:hover { background:var(--accent-soft); }
+
+a:focus-visible, button:focus-visible, summary:focus-visible {
+  outline:2px solid var(--accent); outline-offset:3px; border-radius:6px;
+}
+.skip { position:absolute; left:-9999px; }
+.skip:focus { left:12px; top:12px; z-index:60; padding:10px 14px; background:var(--surface); border:1px solid var(--line); border-radius:12px; }
+figure img { border-radius:12px; }
+</style>
+</head>
+
+<body>
+<a href="#main" class="skip">Skip to content</a>
+
+<!-- nav: single line, 64px -->
+<header class="sticky top-0 z-50 backdrop-blur-md hair border-b" style="background:color-mix(in srgb, var(--bg) 85%, transparent)">
+  <nav class="max-w-shell mx-auto px-6 h-16 flex items-center gap-8">
+    <a href="#" class="flex items-center gap-2 font-semibold tracking-tight">
+      <span class="acc text-lg leading-none">◤</span> AdProof
+    </a>
+    <div class="hidden md:flex items-center gap-6 text-[14px] t2">
+      <a href="#how" class="hover:text-[color:var(--text)] transition-colors">How it works</a>
+      <a href="#limits" class="hover:text-[color:var(--text)] transition-colors">What it refuses</a>
+      <a href="#who" class="hover:text-[color:var(--text)] transition-colors">Who uses it</a>
+      <a href="#faq" class="hover:text-[color:var(--text)] transition-colors">FAQ</a>
+    </div>
+    <div class="ml-auto flex items-center gap-2">
+      <button onclick="toggleDark()" aria-label="Toggle dark mode" class="p-2 rounded hover:bg-black/5 dark:hover:bg-white/10 transition-colors">
+        <i class="ph ph-sun hidden dark:inline text-[18px]" aria-hidden="true"></i>
+        <i class="ph ph-moon inline dark:hidden text-[18px]" aria-hidden="true"></i>
+      </button>
+      <a href="/app" class="text-[14px] t2 px-3 py-2 hover:text-[color:var(--text)] transition-colors">Sign in</a>
+      <a href="#demo" class="btn btn-primary text-[14px] font-medium px-4 py-2">Book a demo</a>
+    </div>
+  </nav>
+</header>
+
+<main id="main">
+
+<!-- HERO: split. 4 text elements max, subtext under 20 words. -->
+<section class="max-w-shell mx-auto px-6 pt-16 pb-20 md:pt-24 md:pb-28 grid lg:grid-cols-[1.05fr_1fr] gap-14 lg:gap-20 items-center">
+  <div>
+    <p class="font-mono text-[11px] uppercase tracking-[0.16em] t2 mb-6">Creator campaign verification</p>
+    <h1 class="text-4xl md:text-5xl lg:text-6xl font-semibold tracking-tight leading-[1.05]">
+      Proof the brief was followed.
+    </h1>
+    <p class="mt-6 text-lg t2 leading-relaxed max-w-[42ch]">
+      Every requirement checked against the video, with the exact timestamp behind each result.
+    </p>
+    <div class="mt-9 flex flex-wrap gap-3">
+      <a href="#demo" class="btn btn-primary font-medium px-6 py-3">Book a demo</a>
+      <a href="#how" class="btn btn-ghost font-medium px-6 py-3">How it works</a>
+    </div>
+  </div>
+  <figure class="relative">
+    <img src="https://picsum.photos/seed/adproof-review-desk-editing/1200/1000"
+         alt="A reviewer working through creator video footage at a desk."
+         width="1200" height="1000" loading="eager"
+         class="w-full h-[380px] lg:h-[460px] object-cover" />
+  </figure>
+</section>
+
+<!-- PROBLEM: full-width statement, then asymmetric 2-col. -->
+<section class="border-t hair">
+  <div class="max-w-shell mx-auto px-6 py-24 md:py-28">
+    <div class="reveal grid lg:grid-cols-[1.2fr_1fr] gap-14 items-start">
+      <h2 class="text-3xl md:text-4xl font-semibold tracking-tight leading-tight max-w-[18ch]">
+        Manual review is slow, and it does not survive a dispute.
+      </h2>
+      <div class="space-y-7 pt-2">
+        <div>
+          <h3 class="font-semibold mb-1.5">Someone watches everything</h3>
+          <p class="t2 text-[15px] leading-relaxed">A person checks a list of requirements by hand, for every creator, every round.</p>
+        </div>
+        <div class="border-t hair pt-7">
+          <h3 class="font-semibold mb-1.5">Two reviewers, two answers</h3>
+          <p class="t2 text-[15px] leading-relaxed">The same video gets different verdicts, and nothing records why either reviewer decided what they did.</p>
+        </div>
+        <div class="border-t hair pt-7">
+          <h3 class="font-semibold mb-1.5">The evidence is a memory</h3>
+          <p class="t2 text-[15px] leading-relaxed">When a payout is contested, what you have is a recollection and a chat thread.</p>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- HOW: vertical flow with verb labels, one supporting image. -->
+<section id="how" class="border-t hair" style="background:var(--surface)">
+  <div class="max-w-shell mx-auto px-6 py-24 md:py-28">
+    <h2 class="reveal text-3xl md:text-4xl font-semibold tracking-tight max-w-[20ch]">
+      Retrieval, measurement and judgement stay separate.
+    </h2>
+    <p class="reveal mt-4 t2 max-w-[62ch] leading-relaxed">
+      Each layer does only what it can do reliably, and hands the rest on.
+    </p>
+
+    <div class="mt-16 grid lg:grid-cols-[1fr_0.85fr] gap-14 items-start">
+      <ol class="space-y-10">
+        <li class="reveal flex gap-5">
+          <i class="ph ph-list-checks text-[22px] acc mt-0.5 shrink-0" aria-hidden="true"></i>
+          <div>
+            <h3 class="font-semibold text-lg mb-1.5">Define</h3>
+            <p class="t2 text-[15px] leading-relaxed max-w-[52ch]">Each requirement becomes a rule with an explicit threshold and a policy for what a "no match" is allowed to conclude. A named person confirms the set, and it is immutable from then on.</p>
+          </div>
+        </li>
+        <li class="reveal flex gap-5">
+          <i class="ph ph-magnifying-glass text-[22px] acc mt-0.5 shrink-0" aria-hidden="true"></i>
+          <div>
+            <h3 class="font-semibold text-lg mb-1.5">Retrieve</h3>
+            <p class="t2 text-[15px] leading-relaxed max-w-[52ch]">The video is indexed for speech, plus one narrow visual index per visual requirement. Every rule searches for supporting and conflicting moments, so both are equally easy to find.</p>
+          </div>
+        </li>
+        <li class="reveal flex gap-5">
+          <i class="ph ph-ruler text-[22px] acc mt-0.5 shrink-0" aria-hidden="true"></i>
+          <div>
+            <h3 class="font-semibold text-lg mb-1.5">Measure</h3>
+            <p class="t2 text-[15px] leading-relaxed max-w-[52ch]">Durations, counts and thresholds are computed in code, never by a language model. Overlapping moments merge once, so nothing is counted twice.</p>
+          </div>
+        </li>
+        <li class="reveal flex gap-5">
+          <i class="ph ph-gavel text-[22px] acc mt-0.5 shrink-0" aria-hidden="true"></i>
+          <div>
+            <h3 class="font-semibold text-lg mb-1.5">Decide</h3>
+            <p class="t2 text-[15px] leading-relaxed max-w-[52ch]">A reviewer opens any finding at its exact timestamp, confirms or overrides it with a recorded reason, and signs off. Approval stays unavailable until every requirement is resolved.</p>
+          </div>
+        </li>
+      </ol>
+      <figure class="reveal lg:sticky lg:top-24">
+        <img src="https://picsum.photos/seed/adproof-creator-filming-product/900/1100"
+             alt="A creator filming a product on camera."
+             width="900" height="1100" loading="lazy"
+             class="w-full h-[420px] lg:h-[540px] object-cover" />
+      </figure>
+    </div>
+  </div>
+</section>
+
+<!-- LIMITS: asymmetric bento, cells carry visual variation. -->
+<section id="limits" class="border-t hair">
+  <div class="max-w-shell mx-auto px-6 py-24 md:py-28">
+    <p class="reveal font-mono text-[11px] uppercase tracking-[0.16em] t2 mb-5">Restraint</p>
+    <h2 class="reveal text-3xl md:text-4xl font-semibold tracking-tight max-w-[22ch]">
+      What AdProof refuses to do.
+    </h2>
+    <p class="reveal mt-4 t2 max-w-[58ch] leading-relaxed">
+      A verification tool is only worth having if you can trust it when it says it is not sure.
+    </p>
+
+    <div class="mt-14 grid md:grid-cols-3 md:grid-rows-2 gap-5">
+      <article class="reveal surface rounded p-7 md:col-span-2 md:row-span-1" style="background:var(--accent-soft); border-color:var(--accent)">
+        <h3 class="font-semibold text-lg mb-2">A search miss is not proof of absence</h3>
+        <p class="t2 text-[15px] leading-relaxed max-w-[62ch]">When nothing is found, AdProof records why: likely absent, low confidence, index incomplete, or provider failure. Only the strongest of those can produce a failure, and only when the rule opts in.</p>
+      </article>
+      <article class="reveal surface rounded p-7">
+        <h3 class="font-semibold text-lg mb-2">Uncertainty stays visible</h3>
+        <p class="t2 text-[15px] leading-relaxed">If a measurement lands within the sampling resolution of its threshold, it goes to a person instead of picking a side.</p>
+      </article>
+      <article class="reveal surface rounded p-7">
+        <h3 class="font-semibold text-lg mb-2">Machine and human stay distinct</h3>
+        <p class="t2 text-[15px] leading-relaxed">Automated results are immutable. An override sits beside the original, never on top of it, with a recorded reason.</p>
+      </article>
+      <article class="reveal rounded p-7 relative overflow-hidden md:col-span-2 text-white" style="background:#123028">
+        <h3 class="font-semibold text-lg mb-2">No fabricated results</h3>
+        <p class="text-[15px] leading-relaxed opacity-85 max-w-[62ch]">If the analysis service fails you get a visible error, not a plausible looking report. There is no fixture data anywhere in the product, and no silent fallback.</p>
+      </article>
+    </div>
+  </div>
+</section>
+
+<!-- WHO: two-column divided list, not equal cards. -->
+<section id="who" class="border-t hair" style="background:var(--surface)">
+  <div class="max-w-shell mx-auto px-6 py-24 md:py-28">
+    <h2 class="reveal text-3xl md:text-4xl font-semibold tracking-tight mb-12">Who uses it</h2>
+    <div class="grid md:grid-cols-2 gap-x-16">
+      <div class="reveal border-t hair py-7">
+        <h3 class="font-semibold mb-1.5">Influencer agencies</h3>
+        <p class="t2 text-[15px] leading-relaxed">Many submissions across many brands, held to one consistent standard.</p>
+      </div>
+      <div class="reveal border-t hair py-7">
+        <h3 class="font-semibold mb-1.5">Consumer brands</h3>
+        <p class="t2 text-[15px] leading-relaxed">One verification layer covering in-house and agency-run campaigns alike.</p>
+      </div>
+      <div class="reveal border-t hair py-7">
+        <h3 class="font-semibold mb-1.5">Creator marketplaces</h3>
+        <p class="t2 text-[15px] leading-relaxed">Proof of completion, and a defensible record when a submission is contested.</p>
+      </div>
+      <div class="reveal border-t hair py-7">
+        <h3 class="font-semibold mb-1.5">Affiliate programs</h3>
+        <p class="t2 text-[15px] leading-relaxed">Confirm the code was stated and the product was shown, before paying out.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- SCOPE: full-width honest callout. -->
+<section class="border-t hair">
+  <div class="max-w-[820px] mx-auto px-6 py-20">
+    <div class="reveal rounded p-8" style="border-left:3px solid var(--accent); background:var(--surface); border-top:1px solid var(--line); border-right:1px solid var(--line); border-bottom:1px solid var(--line)">
+      <h2 class="text-xl font-semibold mb-3">Where the product is today</h2>
+      <p class="t2 text-[15px] leading-relaxed">
+        AdProof verifies two kinds of requirement automatically right now:
+        <strong style="color:var(--text)">a required spoken phrase</strong> and
+        <strong style="color:var(--text)">a minimum visual duration</strong>.
+        Disclosures, competitor appearances, prohibited claims, sequencing and evidence reels are designed but not built.
+        Subjective requirements such as "feels premium" are routed to human review and never machine scored, by design rather than by omission.
+      </p>
+      <p class="t2 text-[15px] leading-relaxed mt-3">
+        We would rather tell you here than in month two.
+      </p>
+    </div>
+  </div>
+</section>
+
+<!-- FAQ: accordion. -->
+<section id="faq" class="border-t hair" style="background:var(--surface)">
+  <div class="max-w-[820px] mx-auto px-6 py-24 md:py-28">
+    <h2 class="reveal text-3xl md:text-4xl font-semibold tracking-tight mb-12">Questions</h2>
+    <div class="reveal divide-y hair border-y hair">
+      <details class="group py-5">
+        <summary class="flex items-center justify-between gap-4 cursor-pointer font-medium list-none">
+          Does AdProof approve or reject on its own?
+          <i class="ph ph-plus text-[16px] t2 transition-transform group-open:rotate-45 shrink-0" aria-hidden="true"></i>
+        </summary>
+        <p class="t2 text-[15px] leading-relaxed mt-3 max-w-[64ch]">No. It produces a recommendation with evidence, and your policy decides whether a person must sign off. It will never auto-reject on the strength of something it simply failed to find.</p>
+      </details>
+      <details class="group py-5">
+        <summary class="flex items-center justify-between gap-4 cursor-pointer font-medium list-none">
+          How accurate is the visual duration measurement?
+          <i class="ph ph-plus text-[16px] t2 transition-transform group-open:rotate-45 shrink-0" aria-hidden="true"></i>
+        </summary>
+        <p class="t2 text-[15px] leading-relaxed mt-3 max-w-[64ch]">Visual analysis samples a frame at a fixed interval, so measurements are accurate to roughly that interval, and that figure is shown next to every result. Anything falling within one interval of the threshold goes to a person instead of being guessed.</p>
+      </details>
+      <details class="group py-5">
+        <summary class="flex items-center justify-between gap-4 cursor-pointer font-medium list-none">
+          Who can see our creators' unpublished videos?
+          <i class="ph ph-plus text-[16px] t2 transition-transform group-open:rotate-45 shrink-0" aria-hidden="true"></i>
+        </summary>
+        <p class="t2 text-[15px] leading-relaxed mt-3 max-w-[64ch]">Only members of your workspace. Playback is proxied through AdProof behind a short-lived token bound to one person and one asset, and the underlying storage URL is never sent to a browser.</p>
+      </details>
+      <details class="group py-5">
+        <summary class="flex items-center justify-between gap-4 cursor-pointer font-medium list-none">
+          Can we see how a result was produced?
+          <i class="ph ph-plus text-[16px] t2 transition-transform group-open:rotate-45 shrink-0" aria-hidden="true"></i>
+        </summary>
+        <p class="t2 text-[15px] leading-relaxed mt-3 max-w-[64ch]">Every piece of evidence carries the query that retrieved it, the index it came from, the rule version applied and the raw provider response. Reports are versioned and history is append-only.</p>
+      </details>
+      <details class="group py-5">
+        <summary class="flex items-center justify-between gap-4 cursor-pointer font-medium list-none">
+          Is this a chat-with-video tool?
+          <i class="ph ph-plus text-[16px] t2 transition-transform group-open:rotate-45 shrink-0" aria-hidden="true"></i>
+        </summary>
+        <p class="t2 text-[15px] leading-relaxed mt-3 max-w-[64ch]">No, deliberately. The question it answers is narrow: did this submission satisfy the agreed requirements, and what evidence supports that conclusion?</p>
+      </details>
+    </div>
+  </div>
+</section>
+
+<!-- CTA -->
+<section id="demo" class="border-t hair">
+  <div class="max-w-[720px] mx-auto px-6 py-24 md:py-28 text-center reveal">
+    <h2 class="text-3xl md:text-5xl font-semibold tracking-tight leading-tight">Stop taking the brief on trust.</h2>
+    <p class="mt-5 t2 text-lg leading-relaxed">Bring one campaign and a few submissions. We will show you the evidence behind every result.</p>
+    <div class="mt-9 flex flex-wrap gap-3 justify-center">
+      <a href="mailto:hello@adproof.example?subject=AdProof%20demo" class="btn btn-primary font-medium px-7 py-3.5">Book a demo</a>
+      <a href="/app" class="btn btn-ghost font-medium px-7 py-3.5">Sign in</a>
+    </div>
+  </div>
+</section>
+
+</main>
+
+<footer class="border-t hair py-10">
+  <div class="max-w-shell mx-auto px-6 flex flex-wrap items-center justify-between gap-5">
+    <span class="flex items-center gap-2 font-semibold"><span class="acc">◤</span> AdProof</span>
+    <p class="text-[13px] t2">&copy; <span id="year"></span> AdProof. Video infrastructure by VideoDB.</p>
+  </div>
+</footer>
+
+<script>
+const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+const saved = localStorage.getItem('theme');
+if (saved === 'dark' || (!saved && prefersDark)) document.documentElement.classList.add('dark');
+function toggleDark() {
+  document.documentElement.classList.toggle('dark');
+  localStorage.setItem('theme', document.documentElement.classList.contains('dark') ? 'dark' : 'light');
+}
+document.getElementById('year').textContent = new Date().getFullYear();
+
+// MOTION_INTENSITY 3: scroll reveal only. Motivated by hierarchy, nothing loops.
+const reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+if (!reduce) {
+  const io = new IntersectionObserver((entries) => {
+    entries.forEach((e) => { if (e.isIntersecting) { e.target.classList.add('in'); io.unobserve(e.target); } });
+  }, { threshold: 0.12, rootMargin: '0px 0px -40px 0px' });
+  document.querySelectorAll('.reveal').forEach((el, i) => {
+    el.style.transitionDelay = `${Math.min(i % 4, 3) * 60}ms`;
+    io.observe(el);
+  });
+} else {
+  document.querySelectorAll('.reveal').forEach((el) => el.classList.add('in'));
+}
+</script>
+</body>
+</html>
