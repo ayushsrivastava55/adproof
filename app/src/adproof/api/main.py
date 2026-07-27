@@ -921,6 +921,13 @@ def get_report(
                         "measurement_intervals": result.measurement_intervals,
                         "evaluator_version": result.evaluator_version,
                         "source": "machine",
+                        # Which layer concluded this, and what the other layer
+                        # said. Never collapsed into one number.
+                        "decided_by": result.decided_by or "deterministic",
+                        "deterministic_state": result.deterministic_state,
+                        "verdict_model": result.verdict_model,
+                        "verdict_prompt_version": result.verdict_prompt_version,
+                        "verdict_reasoning": result.verdict_reasoning,
                     }
                     if result
                     else None

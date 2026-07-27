@@ -96,7 +96,12 @@ def run_once(adapter: VideoDBAdapter | None = None) -> bool:
     try:
         provider_reference: str | None = None
         if job.job_type is JobType.evaluation:
-            steps.run_evaluation(session, job)
+            # The adapter is passed so the reading model has a provider even
+            # when no OpenRouter key is configured. Measurement stays
+            # deterministic; the adapter is only ever asked to read text.
+            if adapter is None:
+                adapter = VideoDBAdapter()
+            steps.run_evaluation(session, job, adapter)
         else:
             if adapter is None:
                 adapter = VideoDBAdapter()

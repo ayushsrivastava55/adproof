@@ -574,8 +574,21 @@ class EvaluationResult(Base, TimestampMixin):
     #: Accuracy bound implied by index sampling granularity.
     measurement_resolution_seconds: Mapped[float | None] = mapped_column(Float)
     confidence_band: Mapped[ConfidenceBand] = mapped_column(EnumType(ConfidenceBand), nullable=False)
-    #: Grounded, template-generated. No LLM participates in this slice.
+    #: Grounded and template-generated from the deterministic measurement.
     explanation: Mapped[str] = mapped_column(Text, nullable=False)
+    #: Which layer produced `state`: "deterministic" or "verdict_model".
+    #: Recorded so a result never hides who concluded it.
+    decided_by: Mapped[str | None] = mapped_column(String)
+    #: The deterministic evaluator's own conclusion, preserved even when a
+    #: reading model reached a different one. The two are never merged.
+    deterministic_state: Mapped[RuleResultState | None] = mapped_column(
+        EnumType(RuleResultState)
+    )
+    #: Reading-model provenance: exact model id, prompt version, and its stated
+    #: reasoning over the retrieved descriptions.
+    verdict_model: Mapped[str | None] = mapped_column(String)
+    verdict_prompt_version: Mapped[str | None] = mapped_column(String)
+    verdict_reasoning: Mapped[str | None] = mapped_column(Text)
     #: Merged intervals actually used for the measurement, for reviewer audit.
     measurement_intervals: Mapped[list | None] = mapped_column(JSONType)
     evidence_ids: Mapped[list | None] = mapped_column(JSONType)

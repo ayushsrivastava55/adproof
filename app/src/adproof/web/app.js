@@ -235,6 +235,34 @@ function renderEvidence(ev) {
     </li>`;
 }
 
+
+// Who concluded this rule. When the reading model and the deterministic
+// measurement disagree, both answers are shown -- the reviewer sees the
+// conflict rather than a single number that hides it.
+function renderVerdict(res) {
+  if (!res || res.decided_by !== "verdict_model") return "";
+  const disagrees =
+    res.deterministic_state && res.deterministic_state !== res.state;
+  return `
+    <div class="verdict${disagrees ? " verdict-split" : ""}">
+      <p class="verdict-head">
+        <span class="source-tag">read by ${esc(res.verdict_model || "model")}</span>
+        ${
+          disagrees
+            ? `<span class="verdict-warn">disagrees with the measurement, which said “${esc(
+                res.deterministic_state
+              )}”</span>`
+            : `<span class="verdict-ok">agrees with the measurement</span>`
+        }
+      </p>
+      ${
+        res.verdict_reasoning
+          ? `<p class="verdict-why">${esc(res.verdict_reasoning)}</p>`
+          : ""
+      }
+    </div>`;
+}
+
 function renderRuns(runs) {
   return runs
     .map((r) => {
@@ -439,6 +467,7 @@ function renderRules(rules) {
           </p>
           ${measurement}
           ${absence}
+          ${renderVerdict(res)}
           ${res ? `<p class="explanation">${esc(res.explanation)}</p>` : ""}
           ${intervals}
           ${humanBlock}

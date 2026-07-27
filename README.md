@@ -58,6 +58,43 @@ Related guarantees, all enforced rather than documented:
 | Immutable audit artifacts | Postgres triggers, not application convention. |
 | Honest uncertainty | A measurement within one sampling interval of its threshold routes to a human instead of picking a side. |
 
+## How a rule is decided
+
+Three layers, kept separate on purpose, each recorded separately in the result:
+
+1. **Retrieval** — VideoDB returns timestamped descriptions with provider
+   scores. Nothing is concluded here.
+2. **Deterministic measurement** — pure Python merges intervals, totals
+   durations, counts occurrences, and compares against the threshold. No model
+   touches a number.
+3. **Reading** — a language model receives the requirement, the deterministic
+   measurement *as a stated fact*, and both the supporting and the conflicting
+   descriptions, then returns its own verdict and reasoning.
+
+Both conclusions are stored. Where they disagree, the report says so, shows
+each side, and drops confidence to `low` — because two systems reaching
+different answers is information a reviewer needs, not noise to average away.
+
+This layer exists because of a real failure: a rule requiring the creator to
+*use* the product measured 36.8 seconds of screen time and passed, while the
+descriptions underneath it literally read "no one is visibly interacting with
+the product". Arithmetic cannot see that. Reading can.
+
+Guardrails:
+
+- Rules whose answer is arithmetic (exact spoken-phrase counts) never reach a
+  model at all.
+- An unparseable or off-vocabulary answer becomes `uncertain`, never `pass`.
+- A rule the evaluator escalated for human review cannot be cleared to `pass`
+  by a model re-reading the same descriptions.
+- If no model is reachable, the deterministic result stands and the report says
+  no reading happened. There is no canned fallback verdict.
+
+Provider: OpenRouter free tier when `OPENROUTER_API_KEY` is set (a chain of
+free models, since free slugs get retired mid-flight — `llama-3.3-70b-instruct:free`
+started returning 404 "no longer free" during development), otherwise VideoDB's
+own `Collection.generate_text`. Whichever answered is named in the result.
+
 ## VideoDB primitives used
 
 Pinned to `videodb==0.5.1`. Everything below was verified by source
@@ -75,6 +112,7 @@ introspection and then against the live API.
 | `Video.legacy_search(query, search_type, index_type, score_threshold, result_threshold, scene_index_id)` | retrieval | Per-rule reproducible search, keyword and semantic |
 | `Video.generate_stream()` | playback | HLS stream, proxied by AdProof |
 | `Video.delete_scene_index(id)` | cleanup | Removing duplicate indexes |
+| `Collection.generate_text(prompt, model_name="pro")` | evidence qualification, rule verdict | Reading retrieved descriptions — never measuring |
 
 **Deliberately not used:** `ask()` and Search V2's high-level `search()`. `ask`
 is a chat-over-video affordance and falls outside this product's boundary;

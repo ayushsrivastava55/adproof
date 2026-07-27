@@ -8,6 +8,7 @@ of a stage that failed.
 from __future__ import annotations
 
 import logging
+from dataclasses import dataclass
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -50,6 +51,7 @@ from ..retrieval.qualify import (
     UNSURE,
     qualify_texts,
 )
+from ..retrieval import verdict as verdict_layer
 from ..retrieval.plan import (
     SPOKEN_INDEX_NAME,
     VISUAL_SECONDS_PER_SCENE,
@@ -620,10 +622,181 @@ def _visual_resolution(
     return index.measurement_resolution_seconds if index else None
 
 
-def run_evaluation(session: Session, job: ProcessingJob) -> None:
-    """Deterministic evaluation.
+#: Rule types whose outcome turns on reading a description rather than on
+#: counting an exact token. Spoken-phrase rules stay purely deterministic:
+#: "did the transcript contain this phrase N times" is arithmetic, and handing
+#: it to a language model would only add a way to get it wrong.
+_INTERPRETIVE_RULE_TYPES = frozenset({
+    RuleType.min_visual_duration,
+    RuleType.max_visual_duration,
+    RuleType.required_visual_event,
+    RuleType.forbidden_visual_event,
+    RuleType.disclosure_present,
+    RuleType.sequence,
+})
 
-    No provider access and no language model participate in this step.
+_VERDICT_STATES = {
+    "pass": RuleResultState.passed,
+    "fail": RuleResultState.failed,
+    "uncertain": RuleResultState.uncertain,
+}
+
+
+@dataclass(frozen=True)
+class _ReviewedOutcome:
+    """The result after both layers have had their say."""
+
+    state: RuleResultState
+    confidence_band: ConfidenceBand
+    explanation: str
+    decided_by: str
+    model: str | None = None
+    prompt_version: str | None = None
+    reasoning: str | None = None
+
+
+def _measurement_summary(outcome) -> str:
+    """State the deterministic finding as a fact for the reading model.
+
+    The model is given the number; it is never asked to produce one.
+    """
+    if outcome.measured_value is None:
+        return "No measurement applies to this rule type."
+    unit = outcome.measured_unit or ""
+    text = f"measured {outcome.measured_value:g} {unit}".strip()
+    if outcome.threshold_value is not None:
+        text += f", against a threshold of {outcome.threshold_value:g} {unit}".strip()
+    return (
+        f"Deterministic code {text}. It counted only descriptions that passed "
+        f"qualification, so this number can understate reality if qualification "
+        f"was wrong. Its own conclusion was '{outcome.state.value}'."
+    )
+
+
+def _evidence_lines(items, role, offset=0):
+    return [
+        verdict_layer.EvidenceLine(
+            index=offset + n,
+            start_seconds=item.start_seconds,
+            end_seconds=item.end_seconds,
+            text=item.text,
+            role=role,
+        )
+        for n, item in enumerate(items, start=1)
+    ]
+
+
+def _apply_verdict_model(*, rule, outcome, supporting, conflicting, adapter=None):
+    """Let a reading model decide interpretive rules from the descriptions.
+
+    The deterministic measurement is computed first and passed in as a fact.
+    The model reads the supporting and conflicting descriptions and returns its
+    own verdict. Both conclusions are stored; where they disagree, the
+    disagreement is stated in the explanation and confidence drops, because two
+    layers reaching different answers is exactly the situation a reviewer needs
+    to see rather than have resolved silently.
+
+    Deliberate limits:
+      * purely arithmetic rules never reach this function;
+      * if the model is unreachable the deterministic result stands and the
+        result records that no model participated -- there is no pretence that
+        a reading happened;
+      * an unparseable answer becomes `uncertain`, never a pass.
+    """
+    deterministic = _ReviewedOutcome(
+        state=outcome.state,
+        confidence_band=outcome.confidence_band,
+        explanation=outcome.explanation,
+        decided_by="deterministic",
+    )
+
+    if rule.rule_type not in _INTERPRETIVE_RULE_TYPES:
+        return deterministic
+    if not verdict_layer.is_configured(adapter):
+        return deterministic
+    if not supporting and not conflicting:
+        # Nothing was retrieved at all. There is no text to read, so the
+        # absence policy the deterministic evaluator already applied is the
+        # honest answer; asking a model to opine on an empty page is not.
+        return deterministic
+
+    lines = _evidence_lines(supporting, "supporting")
+    lines += _evidence_lines(conflicting, "conflicting", offset=len(supporting))
+
+    try:
+        result = verdict_layer.get_verdict(
+            requirement=rule.requirement_text,
+            measurement=_measurement_summary(outcome),
+            supporting=[line for line in lines if line.role == "supporting"],
+            conflicting=[line for line in lines if line.role == "conflicting"],
+            adapter=adapter,
+        )
+    except verdict_layer.VerdictUnavailable as exc:
+        logger.warning("verdict model unavailable for rule %s: %s", rule.id, exc)
+        return _ReviewedOutcome(
+            state=outcome.state,
+            confidence_band=outcome.confidence_band,
+            explanation=(
+                f"{outcome.explanation}\n\nThe reading model was not available "
+                f"for this result ({exc}), so this is the deterministic "
+                f"measurement alone."
+            ),
+            decided_by="deterministic",
+        )
+
+    state = _VERDICT_STATES[result.state]
+
+    if (
+        outcome.state is RuleResultState.human_review_required
+        and state is RuleResultState.passed
+    ):
+        # A rule the evaluator escalated may not be cleared by a model reading
+        # the same descriptions the evaluator already found insufficient. The
+        # verdict is kept, but capped at `uncertain`, which still routes the
+        # submission back to the creator rather than approving it.
+        state = RuleResultState.uncertain
+
+    agrees = state is outcome.state
+
+    if agrees:
+        explanation = (
+            f"{outcome.explanation}\n\nA model read the retrieved descriptions "
+            f"and reached the same conclusion: {result.reasoning}"
+        )
+        band = outcome.confidence_band
+    else:
+        explanation = (
+            f"A model read the retrieved descriptions and concluded "
+            f"'{state.value}': {result.reasoning}\n\n"
+            f"The deterministic measurement concluded "
+            f"'{outcome.state.value}' instead. {outcome.explanation}\n\n"
+            f"The two layers disagree, so confidence in this result is low."
+        )
+        # Disagreement is a genuine loss of certainty and is recorded as one.
+        band = ConfidenceBand.low
+
+    return _ReviewedOutcome(
+        state=state,
+        confidence_band=band,
+        explanation=explanation,
+        decided_by="verdict_model",
+        model=result.model,
+        prompt_version=result.prompt_version,
+        reasoning=result.reasoning,
+    )
+
+
+def run_evaluation(
+    session: Session, job: ProcessingJob, adapter: VideoDBAdapter | None = None
+) -> None:
+    """Evaluation: deterministic measurement, then a reading model verdict.
+
+    Every number -- durations, occurrence counts, merged intervals, threshold
+    comparisons -- is computed here by deterministic code and is never asked of
+    a model. What a model does contribute, for the rule types where the answer
+    turns on interpreting a scene description rather than on arithmetic, is a
+    reading of the supporting and conflicting descriptions. Both conclusions
+    are stored separately (see `_apply_verdict_model`).
     """
     version = _version(session, job.submission_version_id)
     submission = _submission(session, version)
@@ -668,6 +841,10 @@ def run_evaluation(session: Session, job: ProcessingJob) -> None:
         )
         counted: list[CountedEvidence] = []
         by_slot: dict[str, list[CountedEvidence]] = {}
+        #: Everything retrieved for this rule, kept so the reading model sees
+        #: both sides -- including the descriptions the qualifier discarded,
+        #: which are precisely the ones that carry a contradiction.
+        conflicting: list[CountedEvidence] = []
         evidence_truncated = False
         for run in runs:
             if not run.counts_toward_measurement:
@@ -677,11 +854,6 @@ def run_evaluation(session: Session, job: ProcessingJob) -> None:
             for item in session.scalars(
                 select(EvidenceItem).where(EvidenceItem.retrieval_run_id == run.id)
             ):
-                if item.qualification in (CONTRADICTS, UNSURE):
-                    # Qualified out: the description itself does not depict the
-                    # requirement. Recorded and visible to the reviewer, but it
-                    # may not contribute to any measurement.
-                    continue
                 ev = CountedEvidence(
                     evidence_id=item.id,
                     start_seconds=item.start_seconds,
@@ -689,6 +861,12 @@ def run_evaluation(session: Session, job: ProcessingJob) -> None:
                     provider_score=item.provider_score,
                     text=item.text,
                 )
+                if item.qualification in (CONTRADICTS, UNSURE):
+                    # Qualified out: the description itself does not depict the
+                    # requirement. It may not contribute to any measurement,
+                    # but the reading model still gets to see it.
+                    conflicting.append(ev)
+                    continue
                 counted.append(ev)
                 by_slot.setdefault(slot, []).append(ev)
 
@@ -811,19 +989,29 @@ def run_evaluation(session: Session, job: ProcessingJob) -> None:
             case _:
                 raise RuntimeError(f"No evaluator for rule type {rule.rule_type!r}")
 
+        review = _apply_verdict_model(
+            rule=rule, outcome=outcome, supporting=counted,
+            conflicting=conflicting, adapter=adapter,
+        )
+
         session.add(
             EvaluationResult(
                 submission_version_id=version.id,
                 rule_id=rule.id,
                 evaluator_version=outcome.evaluator_version,
-                state=outcome.state,
+                state=review.state,
+                decided_by=review.decided_by,
+                deterministic_state=outcome.state,
+                verdict_model=review.model,
+                verdict_prompt_version=review.prompt_version,
+                verdict_reasoning=review.reasoning,
                 absence_class=outcome.absence_class,
                 measured_value=outcome.measured_value,
                 measured_unit=outcome.measured_unit,
                 threshold_value=outcome.threshold_value,
                 measurement_resolution_seconds=resolution,
-                confidence_band=outcome.confidence_band,
-                explanation=outcome.explanation,
+                confidence_band=review.confidence_band,
+                explanation=review.explanation,
                 measurement_intervals=[
                     list(pair) for pair in outcome.measurement_intervals
                 ],
