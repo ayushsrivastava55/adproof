@@ -1,9 +1,9 @@
 """Application API.
 
-Authentication, workspace authorization, and proxied media playback ARE
-enforced here. Deliberately absent: review actions (confirm/override/escalate/
-approve/reject), pagination, webhooks, exports, and analytics. Their absence is
-stated in /api/integrity rather than stubbed.
+Authentication, workspace authorization, proxied media playback, review
+actions, adjudication, analytics and revision drafts are all served here.
+Deliberately absent: pagination, webhooks, exports, resubmission. Their absence
+is stated in /api/integrity rather than stubbed.
 """
 
 from __future__ import annotations
@@ -208,10 +208,10 @@ def integrity() -> dict[str, Any]:
             "VideoDB for index progress and reports no percentage.",
             "Confidence bands are uncalibrated and must not be read as "
             "probabilities.",
-            "Only two rule types are implemented: required spoken phrase and "
-            "minimum visual duration. Disclosure, competitor, prohibited-claim, "
-            "sequence and placement rules do not exist yet.",
-            "No evidence reels, exports, analytics, or resubmission flow.",
+            "Only required-spoken-phrase and minimum-visual-duration rules "
+            "have been validated against real media. The other rule types are "
+            "implemented and tested but not yet field-validated.",
+            "No evidence reels, exports, or resubmission flow.",
             "Retrieval limits are derived from media duration; when a search "
             "saturates its limit the result is marked as understating the "
             "truth and is never reported as a failure.",
@@ -991,8 +991,15 @@ if WEB_DIR.exists():
 
         Served to anyone, but it renders only a login form until a session
         exists: every data endpoint it calls requires authentication.
+
+        no-cache so a stale shell can never reference stale assets: a cached
+        HTML + cached CSS pair is exactly what made every view render stacked
+        on one page.
         """
-        return FileResponse(WEB_DIR / "index.html")
+        return FileResponse(
+            WEB_DIR / "index.html",
+            headers={"Cache-Control": "no-cache, must-revalidate"},
+        )
 
 
 # --------------------------------------------------------------------------

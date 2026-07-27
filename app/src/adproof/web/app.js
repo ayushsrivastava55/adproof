@@ -504,39 +504,57 @@ function openDecision(decision) {
   dlg.showModal();
 }
 
-async function playAt(evidenceId) {
+function loadStream(url, onReady) {
+  // url points at AdProof's own proxy, never at the provider.
+  const player = $("player");
+  if (player.dataset.src === url) {
+    if (onReady) onReady();
+    return;
+  }
+  player.dataset.src = url;
+  if (window.Hls && window.Hls.isSupported()) {
+    if (hls) hls.destroy();
+    hls = new window.Hls();
+    hls.loadSource(url);
+    hls.attachMedia(player);
+    if (onReady) hls.on(window.Hls.Events.MANIFEST_PARSED, onReady);
+  } else if (player.canPlayType("application/vnd.apple.mpegurl")) {
+    player.src = url;
+    if (onReady) player.addEventListener("loadedmetadata", onReady, { once: true });
+  } else {
+    $("player-note").textContent =
+      "This browser cannot play HLS streams; evidence playback is unavailable.";
+  }
+}
+
+async function fetchPlayback(evidenceId) {
   const res = await api(`/api/evidence/${evidenceId}/playback`);
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
-    document.getElementById("player-note").textContent =
+    $("player-note").textContent =
       body.detail ?? "Playback is unavailable for this evidence item.";
-    return;
+    return null;
   }
-  const data = await res.json();
+  return res.json();
+}
+
+// Attach the stream as soon as the report opens, so the native play button
+// works without first clicking an evidence timestamp.
+async function preloadPlayer(evidenceId) {
+  const data = await fetchPlayback(evidenceId);
+  if (data) loadStream(data.playback_url);
+}
+
+async function playAt(evidenceId) {
+  const data = await fetchPlayback(evidenceId);
+  if (!data) return;
   const player = $("player");
   const seek = () => {
     player.currentTime = data.seek_to_seconds;
     player.play().catch(() => {});
   };
-  // data.playback_url points at AdProof's own proxy, never at the provider.
-  if (player.dataset.src === data.playback_url) {
-    seek();
-    return;
-  }
-  player.dataset.src = data.playback_url;
-  if (window.Hls && window.Hls.isSupported()) {
-    if (hls) hls.destroy();
-    hls = new window.Hls();
-    hls.loadSource(data.playback_url);
-    hls.attachMedia(player);
-    hls.on(window.Hls.Events.MANIFEST_PARSED, seek);
-  } else if (player.canPlayType("application/vnd.apple.mpegurl")) {
-    player.src = data.playback_url;
-    player.addEventListener("loadedmetadata", seek, { once: true });
-  } else {
-    document.getElementById("player-note").textContent =
-      "This browser cannot play HLS streams; evidence playback is unavailable.";
-  }
+  loadStream(data.playback_url, seek);
+  if (player.dataset.src === data.playback_url && player.readyState >= 1) seek();
 }
 
 async function loadReport() {
@@ -545,7 +563,10 @@ async function loadReport() {
   if (!res.ok) return;
   const data = await res.json();
 
-  $("report-panel").hidden = false;
+  // Swap the placeholder for the report. `report-panel` is the always-visible
+  // container; the report itself lives in `report-body`.
+  $("report-placeholder").hidden = true;
+  $("report-body").hidden = false;
   $("report-title").textContent = `Submission — ${data.submission.creator_reference}`;
   const chip = $("submission-state");
   chip.textContent = data.submission.state;
@@ -593,6 +614,9 @@ async function loadReport() {
 
   $("adjudication-slot").innerHTML = renderAdjudication(data);
   renderRules(data.rules);
+
+  const firstEvidence = data.rules.flatMap((r) => r.evidence)[0];
+  if (data.media && firstEvidence) preloadPlayer(firstEvidence.id);
 
   clearTimeout(pollTimer);
   if (!data.processing_complete) {
