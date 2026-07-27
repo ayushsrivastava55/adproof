@@ -496,6 +496,94 @@ class VideoDBAdapter:
                 return entry.get("status")
         return None
 
+    def get_transcript_text(
+        self,
+        provider_video_id: str,
+        collection_id: str | None = None,
+    ) -> str:
+        """The spoken-word transcript as plain text.
+
+        Used only to check whether a required phrase was rendered by ASR under
+        a different spelling. Never used to measure or to count.
+        """
+        video = self._get_video(provider_video_id, collection_id)
+        try:
+            return video.get_transcript_text() or ""
+        except InvalidRequestError as exc:
+            raise ProviderRejected(
+                f"VideoDB could not return the transcript: {_reason(exc)}",
+                str(exc),
+            ) from exc
+        except VideodbError as exc:
+            raise ProviderUnavailable(
+                "Could not read the spoken transcript.", str(exc)
+            ) from exc
+
+    def list_scenes(
+        self,
+        provider_video_id: str,
+        scene_index_id: str,
+        collection_id: str | None = None,
+        index_name: str | None = None,
+    ) -> list[RetrievedShot]:
+        """Every scene record in a visual index, in order.
+
+        This is the correct substrate for measuring how long something was
+        visible. `legacy_search` returns *shots*, which are top-K matching
+        chunks coalesced into contiguous runs -- so raising `result_threshold`
+        merges neighbours and collapses a whole video into one shot carrying
+        only its first scene's description. Verified live on 27 Jul 2026: for a
+        42s video, result_threshold 5 -> 4 shots / 10.1s, 10 -> 6 shots /
+        20.1s, 25 -> 1 shot / 42.8s. Duration measured off that is a function
+        of the tuning parameter, not of the media.
+
+        Enumerating the index instead gives every scene its own boundaries and
+        its own description, so a duration is a sum over real intervals.
+        `provider_score` is None here by design: these records were not ranked
+        against a query, and inventing a similarity score for them would be
+        fabricating provenance.
+        """
+        video = self._get_video(provider_video_id, collection_id)
+        try:
+            records = video.get_scene_index(scene_index_id)
+        except InvalidRequestError as exc:
+            raise ProviderRejected(
+                f"VideoDB could not return scene index {scene_index_id!r}: "
+                f"{_reason(exc)}",
+                str(exc),
+            ) from exc
+        except VideodbError as exc:
+            raise ProviderUnavailable(
+                "Could not read the visual index.", str(exc)
+            ) from exc
+
+        scenes: list[RetrievedShot] = []
+        for record in records or []:
+            start = record.get("start")
+            if start is None:
+                # Unseekable and unmeasurable; dropping it is correct.
+                logger.warning(
+                    "Discarding scene record without a start time (video=%s)",
+                    provider_video_id,
+                )
+                continue
+            scenes.append(
+                RetrievedShot(
+                    start_seconds=float(start),
+                    end_seconds=(
+                        float(record["end"]) if record.get("end") is not None else None
+                    ),
+                    text=record.get("description"),
+                    provider_score=None,
+                    provider_index_id=scene_index_id,
+                    provider_index_name=index_name,
+                    stream_url=None,
+                    snapshot=None,
+                )
+            )
+        scenes.sort(key=lambda scene: scene.start_seconds)
+        return scenes
+
     def scene_index_record_count(
         self,
         provider_video_id: str,

@@ -204,6 +204,10 @@ class PlannedSearch:
     plan_version: str = RETRIEVAL_PLAN_VERSION
 
 
+#: See _spoken below for why this is far lower than the scene threshold.
+SPOKEN_SEMANTIC_THRESHOLD = 0.1
+
+
 def _spoken(query, *, keyword, role, counts, slot="primary"):
     return PlannedSearch(
         query=query,
@@ -211,7 +215,13 @@ def _spoken(query, *, keyword, role, counts, slot="primary"):
         search_type=SearchType.keyword if keyword else SearchType.semantic,
         role=role,
         counts_toward_measurement=counts,
-        score_threshold=None if keyword else 0.3,
+        # Spoken semantic scores sit on a lower scale than scene scores.
+        # Verified live 27 Jul 2026: a transcript opening "So this is a paid
+        # promotion" scored under 0.2 against "advertisement disclosure,
+        # sponsored, paid partnership" and was missed entirely at 0.3. The cost
+        # of the looser cutoff is precision, which the evidence qualifier --
+        # not the threshold -- is responsible for.
+        score_threshold=None if keyword else SPOKEN_SEMANTIC_THRESHOLD,
         result_threshold=MIN_RESULT_THRESHOLD,
         index_name=SPOKEN_INDEX_NAME,
         slot=slot,

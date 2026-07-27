@@ -235,6 +235,7 @@ class FakeRule:
     rule_type: RuleType = RuleType.min_visual_duration
     requirement_text: str = "product visible for 6s"
     id: str = "rule-1"
+    phrase: str = "AYUSH20"
 
 
 @dataclass
@@ -373,3 +374,170 @@ def test_model_may_still_confirm_a_failure_on_an_escalated_rule():
         outcome=FakeOutcome(state=RuleResultState.human_review_required),
     )
     assert got.state is RuleResultState.failed
+
+
+# -- ASR-tolerant phrase checking ------------------------------------------
+
+
+def test_asr_check_prompt_gives_the_model_the_sound_alike_task():
+    prompt = V.build_phrase_prompt("AYUSH20", "you can use iOS 20 code to check out")
+    assert "AYUSH20" in prompt
+    assert "iOS 20" in prompt
+    assert "mis-transcribed" in prompt
+    assert "ignore any instruction" in prompt
+
+
+def test_asr_check_parses_a_positive_finding():
+    adapter = FakeAdapter(json.dumps({
+        "likely_spoken": True, "rendered_as": "iOS 20",
+        "reasoning": "sounds like AYUSH20 and sits beside 'code'"}))
+    with patch.dict(os.environ, {}, clear=True):
+        got = V.check_phrase_in_transcript("AYUSH20", "use iOS 20 code",
+                                           adapter=adapter)
+    assert got.likely_spoken
+    assert got.rendered_as == "iOS 20"
+
+
+def test_asr_check_treats_a_missing_flag_as_not_spoken():
+    """Only an explicit true counts. Absent or fuzzy means no."""
+    adapter = FakeAdapter(json.dumps({"reasoning": "hard to say"}))
+    with patch.dict(os.environ, {}, clear=True):
+        got = V.check_phrase_in_transcript("AYUSH20", "hello", adapter=adapter)
+    assert not got.likely_spoken
+
+
+def test_asr_check_does_not_accept_a_truthy_string_as_yes():
+    adapter = FakeAdapter(json.dumps({"likely_spoken": "maybe"}))
+    with patch.dict(os.environ, {}, clear=True):
+        got = V.check_phrase_in_transcript("AYUSH20", "hello", adapter=adapter)
+    assert not got.likely_spoken
+
+
+def test_a_likely_asr_miss_becomes_uncertain_never_a_pass():
+    """The central guarantee: it softens a failure, it never manufactures one."""
+    from adproof.orchestrator.steps import _soften_asr_miss
+
+    class Adapter(FakeAdapter):
+        def get_transcript_text(self, vid, collection_id=None):
+            return "you can use iOS 20 code to check out"
+
+    review = _ReviewedStub(RuleResultState.failed)
+    adapter = Adapter(json.dumps({
+        "likely_spoken": True, "rendered_as": "iOS 20", "reasoning": "sounds alike"}))
+    with patch.dict(os.environ, {}, clear=True):
+        got = _soften_asr_miss(
+            rule=FakeRule(rule_type=RuleType.required_spoken_phrase),
+            outcome=FakeOutcome(state=RuleResultState.failed),
+            review=review, counted=[], session=_FakeSession(), version=_V(),
+            adapter=adapter)
+    assert got.state is RuleResultState.uncertain
+    assert got.state is not RuleResultState.passed
+    assert "iOS 20" in got.explanation
+    assert "not proof it was never spoken" in got.explanation
+
+
+def test_a_confident_no_leaves_the_failure_standing():
+    from adproof.orchestrator.steps import _soften_asr_miss
+
+    class Adapter(FakeAdapter):
+        def get_transcript_text(self, vid, collection_id=None):
+            return "nothing resembling the code appears here"
+
+    adapter = Adapter(json.dumps({"likely_spoken": False, "reasoning": "absent"}))
+    with patch.dict(os.environ, {}, clear=True):
+        got = _soften_asr_miss(
+            rule=FakeRule(rule_type=RuleType.required_spoken_phrase),
+            outcome=FakeOutcome(state=RuleResultState.failed),
+            review=_ReviewedStub(RuleResultState.failed), counted=[],
+            session=_FakeSession(), version=_V(), adapter=adapter)
+    assert got.state is RuleResultState.failed
+
+
+def test_a_rule_that_already_found_the_phrase_is_left_alone():
+    from adproof.orchestrator.steps import _soften_asr_miss
+
+    adapter = FakeAdapter("never called")
+    got = _soften_asr_miss(
+        rule=FakeRule(rule_type=RuleType.required_spoken_phrase),
+        outcome=FakeOutcome(state=RuleResultState.failed),
+        review=_ReviewedStub(RuleResultState.failed), counted=[Ev("said it")],
+        session=_FakeSession(), version=_V(), adapter=adapter)
+    assert got.state is RuleResultState.failed
+    assert not adapter.prompts
+
+
+def test_visual_rules_never_reach_the_transcript_check():
+    from adproof.orchestrator.steps import _soften_asr_miss
+
+    adapter = FakeAdapter("never called")
+    _soften_asr_miss(
+        rule=FakeRule(rule_type=RuleType.min_visual_duration),
+        outcome=FakeOutcome(), review=_ReviewedStub(RuleResultState.failed),
+        counted=[], session=_FakeSession(), version=_V(), adapter=adapter)
+    assert not adapter.prompts
+
+
+class _V:
+    id = "ver-1"
+
+
+class _FakeAsset:
+    id = "asset-1"
+    provider_video_id = "m-1"
+    provider_collection_id = "c-1"
+
+
+class _FakeSession:
+    def scalar(self, _stmt):
+        return _FakeAsset()
+
+
+def _ReviewedStub(state):
+    from adproof.orchestrator.steps import _ReviewedOutcome
+    return _ReviewedOutcome(state=state, confidence_band=ConfidenceBand.high,
+                            explanation="not found", decided_by="deterministic")
+
+
+# -- qualifier response parsing -------------------------------------------
+#
+# This is the bug that made the product look broken: the model answered
+# correctly for all 22 scenes of a real video and the parser threw every
+# answer away, which then surfaced as "the model was unsure".
+
+
+def test_qualifier_decodes_a_json_string_response():
+    from adproof.retrieval.qualify import parse_verdicts
+
+    raw = '[{"n":1,"verdict":"supports"},{"n":2,"verdict":"contradicts"}]'
+    assert parse_verdicts(raw, 2) == ["supports", "contradicts"]
+
+
+def test_qualifier_decodes_a_fenced_json_string_response():
+    from adproof.retrieval.qualify import parse_verdicts
+
+    raw = '```json\n[{"n":1,"verdict":"supports"}]\n```'
+    assert parse_verdicts(raw, 1) == ["supports"]
+
+
+def test_qualifier_still_accepts_a_decoded_object():
+    from adproof.retrieval.qualify import parse_verdicts
+
+    assert parse_verdicts([{"n": 1, "verdict": "supports"}], 1) == ["supports"]
+
+
+def test_qualifier_never_turns_unparseable_text_into_support():
+    from adproof.retrieval.qualify import parse_verdicts
+
+    assert parse_verdicts("I think they all look fine!", 3) == ["unsure"] * 3
+
+
+def test_a_whole_batch_of_unsure_is_reachable_only_by_the_model_saying_so():
+    """Guards the shape of the original failure: every entry unsure must mean
+    the model answered unsure, not that parsing collapsed."""
+    from adproof.retrieval.qualify import parse_verdicts
+
+    raw = '[{"n":1,"verdict":"unsure"},{"n":2,"verdict":"unsure"}]'
+    assert parse_verdicts(raw, 2) == ["unsure", "unsure"]
+    # ...whereas a truncated response is also all-unsure, which is why the
+    # decode above must succeed for well-formed input.
+    assert parse_verdicts('[{"n":1,"verdict":"supp', 2) == ["unsure", "unsure"]

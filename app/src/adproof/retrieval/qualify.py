@@ -23,6 +23,11 @@ Integrity properties:
 
 from __future__ import annotations
 
+import json
+import logging
+
+logger = logging.getLogger(__name__)
+
 QUALIFIER_VERSION = "evidence-qualifier/v1-videodb-pro"
 
 SUPPORTS = "supports"
@@ -66,6 +71,29 @@ def parse_verdicts(raw, count: int) -> list[str]:
     HELP, but a malformed response cannot manufacture support.
     """
     verdicts = [UNSURE] * count
+
+    # Providers differ: VideoDB's generate_text returns a decoded object, while
+    # OpenRouter returns the completion as text. Failing to decode the string
+    # form silently degraded every verdict to "unsure" -- on real media the
+    # model answered correctly for all 22 scenes and the parser discarded all
+    # 22, which then read as "the model was unsure" in the report.
+    if isinstance(raw, str):
+        text = raw.strip()
+        if text.startswith("```"):
+            text = text.split("```")[1]
+            if text.startswith("json"):
+                text = text[4:]
+        start = min(
+            (i for i in (text.find("["), text.find("{")) if i != -1), default=-1
+        )
+        end = max(text.rfind("]"), text.rfind("}"))
+        if start == -1 or end == -1:
+            return verdicts
+        try:
+            raw = json.loads(text[start : end + 1])
+        except json.JSONDecodeError:
+            return verdicts
+
     items = raw if isinstance(raw, list) else raw.get("items", []) if isinstance(raw, dict) else []
     for item in items:
         if not isinstance(item, dict):
@@ -80,12 +108,42 @@ def parse_verdicts(raw, count: int) -> list[str]:
     return verdicts
 
 
+#: Descriptions per provider call. A full scene index can be 20+ descriptions
+#: of 700 chars; asking for all of them at once produced a response that would
+#: not parse, and every entry silently degraded to "unsure" -- 22 of 22 on real
+#: media, which reads as "the model was unsure" when in fact it never answered.
+#: Small batches keep each response short enough to come back well-formed.
+_BATCH_SIZE = 6
+
+
 def qualify_texts(adapter, concept: str, texts: list[str], *, collection_id=None) -> list[str]:
-    """One provider call per rule, one verdict per description. Raises
-    ProviderError on failure -- the caller must surface it, not swallow it."""
+    """One verdict per description, in batches.
+
+    Prefers OpenRouter when configured -- it returns clean JSON reliably --
+    and falls back to VideoDB's generate_text otherwise. Raises ProviderError
+    on failure; the caller must surface it rather than swallow it.
+    """
     if not texts:
         return []
-    raw = adapter.generate_text_json(
-        build_prompt(concept, texts), collection_id=collection_id
-    )
-    return parse_verdicts(raw, len(texts))
+
+    verdicts: list[str] = []
+    for start in range(0, len(texts), _BATCH_SIZE):
+        batch = texts[start : start + _BATCH_SIZE]
+        prompt = build_prompt(concept, batch)
+        raw = _complete(adapter, prompt, collection_id)
+        verdicts.extend(parse_verdicts(raw, len(batch)))
+    return verdicts
+
+
+def _complete(adapter, prompt: str, collection_id):
+    from . import verdict as verdict_layer
+
+    if verdict_layer.os.getenv("OPENROUTER_API_KEY"):
+        last = None
+        for model in verdict_layer.FREE_MODELS:
+            try:
+                return verdict_layer._openrouter_content(prompt, model)
+            except verdict_layer.VerdictUnavailable as exc:
+                last = exc
+        logger.warning("all free qualifier models failed (%s); using VideoDB", last)
+    return adapter.generate_text_json(prompt, collection_id=collection_id)

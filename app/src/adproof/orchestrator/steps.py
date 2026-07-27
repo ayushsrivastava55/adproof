@@ -13,7 +13,7 @@ from dataclasses import dataclass
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from videodb import IndexType
+from videodb import IndexType, SearchType
 
 from ..audit import record_audit
 from ..evaluation.absence import Coverage
@@ -449,17 +449,47 @@ def run_retrieval(
                 session.flush()
                 continue
 
+            # Duration rules enumerate the whole scene index instead of
+            # searching it. Search returns merged shots whose span depends on
+            # result_threshold, so a measured duration would be a function of
+            # tuning rather than of the media (see adapter.list_scenes).
+            enumerate_scenes = (
+                planned.counts_toward_measurement
+                and planned.index_type == IndexType.scene
+                and index is not None
+                and rule.rule_type
+                in (RuleType.min_visual_duration, RuleType.max_visual_duration)
+            )
             try:
-                shots = adapter.search(
-                    asset.provider_video_id,
-                    query=planned.query,
-                    index_type=planned.index_type,
-                    search_type=planned.search_type,
-                    score_threshold=planned.score_threshold,
-                    result_threshold=effective_threshold,
-                    scene_index_id=index.provider_index_id if index else None,
-                    collection_id=asset.provider_collection_id,
-                )
+                if enumerate_scenes:
+                    shots = adapter.list_scenes(
+                        asset.provider_video_id,
+                        index.provider_index_id,
+                        collection_id=asset.provider_collection_id,
+                        index_name=planned.index_name,
+                    )
+                    run.request_params = {
+                        **request_params,
+                        "retrieval_mode": "full_scene_enumeration",
+                        "note": (
+                            "Every scene in the index was read and qualified. "
+                            "No search ranking was applied, so no similarity "
+                            "score exists for these records."
+                        ),
+                    }
+                else:
+                    shots = adapter.search(
+                        asset.provider_video_id,
+                        query=planned.query,
+                        index_type=planned.index_type,
+                        search_type=planned.search_type,
+                        score_threshold=planned.score_threshold,
+                        result_threshold=effective_threshold,
+                        scene_index_id=(
+                            index.provider_index_id if index else None
+                        ),
+                        collection_id=asset.provider_collection_id,
+                    )
             except ProviderError as exc:
                 # One failed search must not abort the whole retrieval: other
                 # rules can still produce honest results.
@@ -477,12 +507,18 @@ def run_retrieval(
             # hits and disclosure-marker evidence are not qualified: they are
             # already deterministic.
             verdicts = [None] * len(shots)
-            if (
-                shots
-                and planned.counts_toward_measurement
-                and planned.index_type == IndexType.scene
-                and rule.rule_type is not RuleType.disclosure_present
-            ):
+            # Spoken semantic hits are qualified too. Their score threshold is
+            # deliberately loose (see plan.SPOKEN_SEMANTIC_THRESHOLD), so
+            # reading the matched words is what supplies precision. Keyword
+            # runs are exempt: an exact match needs no interpretation.
+            qualifiable = (
+                planned.search_type == SearchType.semantic
+                and not (
+                    planned.index_type == IndexType.scene
+                    and rule.rule_type is RuleType.disclosure_present
+                )
+            )
+            if shots and planned.counts_toward_measurement and qualifiable:
                 # The qualification question must match what the RULE
                 # measures, not the retrieval query. Search phrasing is
                 # deliberately narrow for recall ("being held up and shown to
@@ -499,6 +535,18 @@ def run_retrieval(
                         f"{rule.visual_concept} -- or clearly the same product "
                         f"or object -- is VISIBLE in the frame. Visibility is "
                         f"enough; it does not need to be held or in use."
+                    )
+                elif rule.rule_type is RuleType.disclosure_present:
+                    concept = (
+                        "the speaker states that this video is an "
+                        "advertisement, a paid promotion, sponsored, or a paid "
+                        "partnership. A generic mention of a brand or product "
+                        "is NOT a disclosure."
+                    )
+                elif planned.index_type == IndexType.spoken_word:
+                    concept = (
+                        f"the speaker actually says this: {planned.query}. "
+                        f"Merely discussing a related topic is not enough."
                     )
                 else:
                     concept = (
@@ -786,6 +834,69 @@ def _apply_verdict_model(*, rule, outcome, supporting, conflicting, adapter=None
     )
 
 
+def _soften_asr_miss(
+    *, rule, outcome, review, counted, session, version, adapter
+):
+    """A required phrase missing from a transcript is not proof it was unsaid.
+
+    Coined tokens -- discount codes, brand names, handles -- are routinely
+    mis-transcribed into ordinary words that sound similar. Verified on real
+    media: a creator said "AYUSH20" and VideoDB's ASR rendered it "iOS 20", so
+    the exact-match search correctly found nothing and the rule failed a
+    creator who had complied.
+
+    So when an exact phrase match finds nothing, a model reads the transcript
+    and asks whether anything in it plausibly *sounds* like the phrase. A
+    positive answer never yields a pass -- exactness cannot be confirmed from a
+    mangled transcript. It yields `uncertain`, which routes the submission back
+    for a second look instead of rejecting on a transcription artifact.
+    """
+    if rule.rule_type is not RuleType.required_spoken_phrase:
+        return review
+    if review.state is not RuleResultState.failed or counted:
+        return review
+
+    asset = _media_asset(session, version.id)
+    if adapter is None or not asset or not asset.provider_video_id:
+        return review
+
+    try:
+        transcript = adapter.get_transcript_text(
+            asset.provider_video_id, collection_id=asset.provider_collection_id
+        )
+        if not transcript.strip():
+            return review
+        check = verdict_layer.check_phrase_in_transcript(
+            rule.phrase, transcript, adapter=adapter
+        )
+    except (ProviderError, verdict_layer.VerdictUnavailable) as exc:
+        logger.warning("ASR variant check unavailable for rule %s: %s", rule.id, exc)
+        return review
+
+    if not check.likely_spoken:
+        return review
+
+    rendered = f' as "{check.rendered_as}"' if check.rendered_as else ""
+    return _ReviewedOutcome(
+        state=RuleResultState.uncertain,
+        confidence_band=ConfidenceBand.low,
+        explanation=(
+            f'The exact phrase "{rule.phrase}" does not appear in the '
+            f"transcript, so it could not be confirmed. However, a model "
+            f"reading the transcript judged that the speaker most likely did "
+            f"say it and that speech recognition rendered it{rendered}. "
+            f"{check.reasoning}\n\n"
+            f"Recorded as uncertain rather than failed: a phrase missing from "
+            f"an imperfect transcript is not proof it was never spoken. "
+            f"Confirming exact wording needs the audio."
+        ),
+        decided_by="verdict_model",
+        model=check.model,
+        prompt_version=verdict_layer.TRANSCRIPT_PROMPT_VERSION,
+        reasoning=check.reasoning,
+    )
+
+
 def run_evaluation(
     session: Session, job: ProcessingJob, adapter: VideoDBAdapter | None = None
 ) -> None:
@@ -992,6 +1103,10 @@ def run_evaluation(
         review = _apply_verdict_model(
             rule=rule, outcome=outcome, supporting=counted,
             conflicting=conflicting, adapter=adapter,
+        )
+        review = _soften_asr_miss(
+            rule=rule, outcome=outcome, review=review, counted=counted,
+            session=session, version=version, adapter=adapter,
         )
 
         session.add(
