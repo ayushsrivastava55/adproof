@@ -37,6 +37,7 @@ from .auth import (
 from .media import issue_playback
 from .media import router as media_router
 from ..evaluation.confidence import derivation_note
+from ..evaluation.evaluators import _declares_disclosure
 from ..models import (
     Campaign,
     Membership,
@@ -830,9 +831,25 @@ def get_report(
                         "text": item.text,
                         "provider_score": item.provider_score,
                         "confidence_band": item.confidence_band,
-                        "counted_toward_measurement": run.counts_toward_measurement
-                        and item.qualification not in ("contradicts", "unsure"),
+                        # What the evaluator actually did with this item, not
+                        # what the retrieval plan intended. Disclosure frames
+                        # count only when their own marker declares a
+                        # disclosure; qualified-out evidence never counts.
+                        "counted_toward_measurement": (
+                            run.counts_toward_measurement
+                            and item.qualification not in ("contradicts", "unsure")
+                            and not (
+                                rule.rule_type is RuleType.disclosure_present
+                                and run.index_type == "scene"
+                                and not _declares_disclosure(item.text)
+                            )
+                        ),
                         "qualification": item.qualification,
+                        "attests_absence": bool(
+                            rule.rule_type is RuleType.disclosure_present
+                            and run.index_type == "scene"
+                            and not _declares_disclosure(item.text)
+                        ),
                         "provenance": {
                             "retrieval_run_id": run.id,
                             "retrieval_query": run.query,

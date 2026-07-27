@@ -187,7 +187,9 @@ function renderEvidence(ev) {
   const counted = ev.counted_toward_measurement
     ? `<span class="tag tag-counted">counted in measurement</span>`
     : `<span class="tag tag-context">context only — not counted</span>`;
-  const roleTag = `<span class="tag tag-${esc(ev.role)}">${esc(ev.role)}</span>`;
+  const roleTag = ev.attests_absence
+    ? `<span class="tag tag-context">reports absence</span>`
+    : `<span class="tag tag-${esc(ev.role)}">${esc(ev.role)}</span>`;
   const score =
     ev.provider_score === null || ev.provider_score === undefined
       ? "not supplied"
