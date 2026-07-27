@@ -108,11 +108,22 @@ _DOMAIN_PROMPTS: dict[VisualIndexDomain, str] = {
         "when packaging is recognisable but the brand is not. Describe whether "
         "it is merely in the background or actively being handled or shown."
     ),
+    # VERIFIED FAILURE, 2026-07-27: descriptions of a package sitting untouched
+    # on a desk ranked above the similarity cutoff for "a person opening ... a
+    # protein product", so 36.8s of nobody-touching-anything passed a
+    # product-use rule -- even though the descriptions literally said "no one
+    # is visibly interacting with the product". Ranking is not presence.
+    # Same fix as the disclosure index: a machine-readable verdict.
     VisualIndexDomain.product_use: (
-        "Report what a person is physically doing with a product: opening or "
-        "unwrapping it, holding it up, applying it, eating or drinking it, "
-        "demonstrating how it works, or using it in a way that looks unsafe or "
-        "contrary to instructions. Describe the action, not its desirability."
+        "Decide whether a person is PHYSICALLY INTERACTING with a product in "
+        "this frame: opening or unwrapping it, holding it, scooping from it, "
+        "applying it, eating or drinking it, or demonstrating its use.\n"
+        "Your FIRST line must be exactly one of:\n"
+        "ACTION_VISIBLE\n"
+        "NO_ACTION_VISIBLE\n"
+        "A product merely sitting in frame with no person touching it is "
+        "NO_ACTION_VISIBLE. If you are unsure, write NO_ACTION_VISIBLE. "
+        "After that line, describe the action you saw, or the scene."
     ),
     VisualIndexDomain.on_screen_claim: (
         "Report any claim rendered as on-screen text or graphics: prices, "

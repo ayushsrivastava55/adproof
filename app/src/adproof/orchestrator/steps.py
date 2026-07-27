@@ -12,11 +12,14 @@ import logging
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from videodb import IndexType
+
 from ..audit import record_audit
 from ..evaluation.absence import Coverage
 from ..evaluation.confidence import band_for_provider_score
 from ..evaluation.evaluators import (
     CountedEvidence,
+    filter_action_evidence,
     evaluate_disclosure,
     evaluate_forbidden_occurrence,
     evaluate_max_visual_duration,
@@ -41,6 +44,12 @@ from ..models import (
 )
 from ..providers.errors import ProviderError
 from ..providers.videodb_adapter import SDK_VERSION, VideoDBAdapter
+from ..retrieval.qualify import (
+    CONTRADICTS,
+    QUALIFIER_VERSION,
+    UNSURE,
+    qualify_texts,
+)
 from ..retrieval.plan import (
     SPOKEN_INDEX_NAME,
     VISUAL_SECONDS_PER_SCENE,
@@ -458,7 +467,64 @@ def run_retrieval(
                 logger.error("retrieval failed for rule %s: %s", rule.id, exc.summary)
                 continue
 
-            for shot in shots:
+            # Qualify counted VISUAL evidence: a model reads each description
+            # against the rule's concept and answers supports / contradicts /
+            # unsure. Ranking alone put a rocket above a real cereal box and
+            # passed 36.8s of an untouched package as "product use"; the
+            # verdict is what separates similarity from presence. Exact keyword
+            # hits and disclosure-marker evidence are not qualified: they are
+            # already deterministic.
+            verdicts = [None] * len(shots)
+            if (
+                shots
+                and planned.counts_toward_measurement
+                and planned.index_type == IndexType.scene
+                and rule.rule_type is not RuleType.disclosure_present
+            ):
+                # The qualification question must match what the RULE
+                # measures, not the retrieval query. Search phrasing is
+                # deliberately narrow for recall ("being held up and shown to
+                # the camera"); asking the qualifier that same question failed
+                # a correct 42.8s visibility pass because the package was
+                # merely sitting in frame. Visibility rules ask visibility;
+                # event rules ask whether the event is happening.
+                if rule.rule_type in (
+                    RuleType.min_visual_duration,
+                    RuleType.max_visual_duration,
+                    RuleType.forbidden_visual_event,
+                ):
+                    concept = (
+                        f"{rule.visual_concept} -- or clearly the same product "
+                        f"or object -- is VISIBLE in the frame. Visibility is "
+                        f"enough; it does not need to be held or in use."
+                    )
+                else:
+                    concept = (
+                        f"{rule.visual_concept} is actually HAPPENING in the "
+                        f"frame, not merely possible."
+                    )
+                try:
+                    verdicts = qualify_texts(
+                        adapter,
+                        concept,
+                        [shot.text or "" for shot in shots],
+                        collection_id=asset.provider_collection_id,
+                    )
+                except ProviderError as exc:
+                    # Qualification failing must fail the run visibly. Skipping
+                    # it would readmit exactly the false positives it exists to
+                    # stop, silently.
+                    run.error_summary = (
+                        f"Evidence qualification failed: {exc.summary}"
+                    )
+                    run.finished_at = utcnow()
+                    session.flush()
+                    logger.error(
+                        "qualification failed for rule %s: %s", rule.id, exc.summary
+                    )
+                    continue
+
+            for shot, verdict in zip(shots, verdicts):
                 session.add(
                     EvidenceItem(
                         retrieval_run_id=run.id,
@@ -477,6 +543,10 @@ def run_retrieval(
                         or planned.index_name,
                         provider_stream_url=shot.stream_url,
                         provider_snapshot=shot.snapshot,
+                        qualification=verdict,
+                        qualifier_version=(
+                            QUALIFIER_VERSION if verdict is not None else None
+                        ),
                     )
                 )
             run.result_count = len(shots)
@@ -607,6 +677,11 @@ def run_evaluation(session: Session, job: ProcessingJob) -> None:
             for item in session.scalars(
                 select(EvidenceItem).where(EvidenceItem.retrieval_run_id == run.id)
             ):
+                if item.qualification in (CONTRADICTS, UNSURE):
+                    # Qualified out: the description itself does not depict the
+                    # requirement. Recorded and visible to the reviewer, but it
+                    # may not contribute to any measurement.
+                    continue
                 ev = CountedEvidence(
                     evidence_id=item.id,
                     start_seconds=item.start_seconds,
@@ -685,6 +760,9 @@ def run_evaluation(session: Session, job: ProcessingJob) -> None:
                 )
 
             case RuleType.required_visual_event:
+                # A frame whose description denies any action never counts,
+                # whatever its similarity score (see filter_action_evidence).
+                counted = filter_action_evidence(counted)
                 if window:
                     outcome = evaluate_required_in_window(
                         concept=rule.visual_concept,

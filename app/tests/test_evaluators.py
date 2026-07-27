@@ -547,3 +547,20 @@ def test_subjective_makes_no_machine_claim():
     assert out.measured_value is None
     assert "makes no machine claim" in out.explanation
     assert "Check lighting" in out.explanation
+
+
+def test_no_action_marker_evidence_never_counts_toward_a_required_action():
+    """Regression: 36.8s of a package sitting untouched passed a product-use
+    rule because semantic ranking put it above the cutoff, while the
+    descriptions said 'no one is visibly interacting with the product'."""
+    from adproof.evaluation.evaluators import filter_action_evidence
+
+    evidence = [
+        CountedEvidence("e1", 0.0, 10.0, 0.5,
+                        text="NO_ACTION_VISIBLE\nA package stands on a desk."),
+        CountedEvidence("e2", 12.0, 14.0, 0.5,
+                        text="ACTION_VISIBLE\nA person scoops powder from the tub."),
+        CountedEvidence("e3", 20.0, 22.0, 0.4, text="legacy description, no marker"),
+    ]
+    kept = filter_action_evidence(evidence)
+    assert [e.evidence_id for e in kept] == ["e2", "e3"]

@@ -525,6 +525,11 @@ class EvidenceItem(Base, TimestampMixin):
     provider_index_id: Mapped[str | None] = mapped_column(String)
     provider_index_name: Mapped[str | None] = mapped_column(String)
     provider_stream_url: Mapped[str | None] = mapped_column(Text)
+    #: Evidence-qualification verdict: supports / contradicts / unsure, or
+    #: null where qualification does not apply (exact keyword hits, disclosure
+    #: marker evidence). Set at insert time; rows are immutable.
+    qualification: Mapped[str | None] = mapped_column(String)
+    qualifier_version: Mapped[str | None] = mapped_column(String)
     #: Verbatim provider result, retained for dispute resolution.
     provider_snapshot: Mapped[dict] = mapped_column(JSONType, nullable=False)
 

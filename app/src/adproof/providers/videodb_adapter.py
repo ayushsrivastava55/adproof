@@ -523,6 +523,45 @@ class VideoDBAdapter:
             ) from exc
         return len(records or [])
 
+    def generate_text_json(
+        self, prompt: str, *, model_name: str = "pro",
+        collection_id: str | None = None,
+    ):
+        """Text generation via VideoDB (Collection.generate_text, verified in
+        0.5.1). Used ONLY to qualify already-retrieved evidence descriptions;
+        never to measure, count, or compare against thresholds.
+        """
+        collection = self.resolve_collection(collection_id)
+        try:
+            result = collection.generate_text(
+                prompt=prompt, model_name=model_name, response_type="json",
+                wait=True,
+            )
+        except RequestTimeoutError as exc:
+            raise ProviderTimeout(
+                "Evidence qualification exceeded the SDK polling budget.",
+                str(exc),
+            ) from exc
+        except InvalidRequestError as exc:
+            raise ProviderRejected(
+                f"VideoDB rejected the qualification request: {_reason(exc)}",
+                str(exc),
+            ) from exc
+        except VideodbError as exc:
+            raise ProviderUnavailable(
+                "Evidence qualification failed.", str(exc)
+            ) from exc
+        if isinstance(result, str):
+            import json as _json
+
+            try:
+                return _json.loads(result)
+            except ValueError as exc:
+                raise ProviderContractViolation(
+                    "Qualification response was not valid JSON."
+                ) from exc
+        return result
+
     # -- retrieval --------------------------------------------------------
 
     def search(

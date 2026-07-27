@@ -691,6 +691,29 @@ def evaluate_sequence(
 #: disclosure text. A marker beats keyword matching because keyword matching
 #: cannot distinguish "I see an ad" from "I do not see an ad" -- observed on a
 #: real commercial, where the model quoted the prompt's own word list inside a
+#: Markers the product-use index emits. A frame whose description declares
+#: NO_ACTION_VISIBLE may never count toward a required action, whatever its
+#: similarity score: ranking is not presence.
+ACTION_MARKER = "action_visible"
+NO_ACTION_MARKER = "no_action_visible"
+
+
+def filter_action_evidence(evidence: list[CountedEvidence]) -> list[CountedEvidence]:
+    """Drop evidence whose own description denies that any action occurred.
+
+    Deterministic containment check on the marker the index is instructed to
+    emit. Descriptions without either marker (older indexes, other domains)
+    pass through unchanged, so this only ever REMOVES support, never adds it.
+    """
+    kept = []
+    for e in evidence:
+        lowered = (e.text or "").lower()
+        if NO_ACTION_MARKER in lowered:
+            continue
+        kept.append(e)
+    return kept
+
+
 #: negation and made every frame look like a disclosure.
 DISCLOSURE_FOUND_MARKER = "disclosure_found"
 DISCLOSURE_ABSENT_MARKER = "disclosure_absent"

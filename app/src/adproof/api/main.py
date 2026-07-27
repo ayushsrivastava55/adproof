@@ -810,7 +810,9 @@ def get_report(
                         "text": item.text,
                         "provider_score": item.provider_score,
                         "confidence_band": item.confidence_band,
-                        "counted_toward_measurement": run.counts_toward_measurement,
+                        "counted_toward_measurement": run.counts_toward_measurement
+                        and item.qualification not in ("contradicts", "unsure"),
+                        "qualification": item.qualification,
                         "provenance": {
                             "retrieval_run_id": run.id,
                             "retrieval_query": run.query,
