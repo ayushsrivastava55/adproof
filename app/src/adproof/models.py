@@ -157,6 +157,14 @@ class Campaign(Base, TimestampMixin):
         ForeignKey("workspace.id"), nullable=False, index=True
     )
     name: Mapped[str] = mapped_column(String, nullable=False)
+    #: When true, the adjudication policy's recommendation is executed
+    #: automatically after evaluation and only submissions WITHOUT a clear
+    #: recommendation reach the human exception queue. Absence-based blocking
+    #: failures still never auto-reject: policy.adjudicate downgrades them to
+    #: request_changes before this flag is consulted.
+    auto_decide: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default="false"
+    )
 
 
 class BriefVersion(Base, TimestampMixin):
@@ -663,9 +671,9 @@ class SubmissionDecision(Base, TimestampMixin):
     submission_version_id: Mapped[str] = mapped_column(
         ForeignKey("submission_version.id"), nullable=False, index=True
     )
-    decided_by_id: Mapped[str] = mapped_column(
-        ForeignKey("app_user.id"), nullable=False
-    )
+    #: Null for automated policy decisions; decided_by_email carries the
+    #: actor string ("policy:auto") in that case.
+    decided_by_id: Mapped[str | None] = mapped_column(ForeignKey("app_user.id"))
     decided_by_email: Mapped[str] = mapped_column(String, nullable=False)
     decision: Mapped[DecisionType] = mapped_column(
         EnumType(DecisionType), nullable=False

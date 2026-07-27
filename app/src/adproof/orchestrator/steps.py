@@ -864,6 +864,8 @@ def run_evaluation(session: Session, job: ProcessingJob) -> None:
     else:
         _set_state(session, version, SubmissionState.ready_for_review)
 
+    _maybe_auto_decide(session, version, submission)
+
     record_audit(
         session,
         workspace_id=submission.workspace_id,
@@ -876,3 +878,126 @@ def run_evaluation(session: Session, job: ProcessingJob) -> None:
             "rules_unresolved": len(unresolved),
         },
     )
+
+
+def _maybe_auto_decide(session, version, submission) -> None:
+    """Execute the policy recommendation when the campaign opted in.
+
+    Triage, not judgement: a submission with a clear recommendation is decided
+    by policy and recorded as such; anything without one stays in the human
+    exception queue. The actor is `policy:auto`, so automated decisions remain
+    permanently distinguishable from human ones, and the same append-only
+    decision record is written either way.
+    """
+    from ..models import Campaign, SubmissionDecision
+    from ..policy import RuleView, adjudicate, state_after
+
+    campaign = session.get(Campaign, submission.campaign_id)
+    if not campaign or not campaign.auto_decide:
+        return
+    views = []
+    for rule in _rules(session, version):
+        result = session.scalar(
+            select(EvaluationResult).where(
+                EvaluationResult.submission_version_id == version.id,
+                EvaluationResult.rule_id == rule.id,
+            )
+        )
+        views.append(RuleView(
+            rule_id=rule.id,
+            requirement_text=rule.requirement_text,
+            severity=rule.severity,
+            machine_state=result.state if result else None,
+            absence_class=result.absence_class if result else None,
+        ))
+    gate = adjudicate(views, processing_complete=True)
+
+    from ..states import DecisionType as DT
+
+    decision_type = gate.recommendation
+    rationale = " ".join(gate.reasons)[:1500] or "Automated policy decision."
+    if decision_type is DT.request_changes:
+        # The rationale is what the creator reads. Send the evidence-grounded
+        # draft, not internal policy reasoning written for reviewers.
+        from ..revisions import draft_revisions
+
+        rationale = ("AUTOMATED: " + draft_revisions(
+            _revision_facts(session, version)
+        ).message)[:2000]
+    if decision_type is None:
+        # Fully automated mode: uncertainty is not parked for a reviewer, it is
+        # bounced to the creator with the evidence-grounded revision draft. The
+        # creator resolves it by fixing or resubmitting; no internal human is
+        # in the loop. Never converted into approve or reject: an unverified
+        # requirement is not a verdict in either direction.
+        from ..revisions import draft_revisions
+
+        decision_type = DT.request_changes
+        facts = _revision_facts(session, version)
+        rationale = (
+            "AUTOMATED: could not verify every requirement. "
+            + draft_revisions(facts).message
+        )[:2000]
+
+    decision = SubmissionDecision(
+        submission_version_id=version.id,
+        decided_by_id=None,
+        decided_by_email="policy:auto",
+        decision=decision_type,
+        rationale=rationale,
+        machine_recommendation=(
+            gate.recommendation.value if gate.recommendation else None
+        ),
+        policy_version=gate.policy_version,
+    )
+    session.add(decision)
+    submission.state = state_after(decision_type)
+    session.flush()
+    record_audit(
+        session,
+        workspace_id=submission.workspace_id,
+        category=f"decision.auto.{decision_type.value}",
+        subject_type="submission",
+        subject_id=submission.id,
+        actor="policy:auto",
+        detail={"policy_version": gate.policy_version, "reasons": gate.reasons},
+    )
+
+
+def _revision_facts(session, version):
+    """RuleFacts for the auto revision draft (mirrors the API endpoint)."""
+    from ..revisions import EvidenceRef, RuleFacts
+
+    facts = []
+    for rule in _rules(session, version):
+        result = session.scalar(
+            select(EvaluationResult).where(
+                EvaluationResult.submission_version_id == version.id,
+                EvaluationResult.rule_id == rule.id,
+            )
+        )
+        if result is None:
+            continue
+        counted = [
+            EvidenceRef(start_seconds=i.start_seconds, end_seconds=i.end_seconds)
+            for run in session.scalars(
+                select(RetrievalRun).where(
+                    RetrievalRun.submission_version_id == version.id,
+                    RetrievalRun.rule_id == rule.id,
+                    RetrievalRun.counts_toward_measurement.is_(True),
+                )
+            )
+            for i in session.scalars(
+                select(EvidenceItem).where(EvidenceItem.retrieval_run_id == run.id)
+            )
+        ]
+        facts.append(RuleFacts(
+            rule_id=rule.id, rule_type=rule.rule_type,
+            requirement_text=rule.requirement_text, severity=rule.severity,
+            state=result.state, absence_class=result.absence_class,
+            measured_value=result.measured_value, measured_unit=result.measured_unit,
+            threshold_value=result.threshold_value,
+            measurement_resolution_seconds=result.measurement_resolution_seconds,
+            evidence=counted, phrase=rule.phrase, visual_concept=rule.visual_concept,
+        ))
+    return facts

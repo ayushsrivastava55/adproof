@@ -352,6 +352,9 @@ class CampaignInput(BaseModel):
     workspace_id: str | None = None
     campaign_name: str
     brief_text: str
+    #: Opt-in automation: execute the policy recommendation after evaluation;
+    #: only submissions without a clear recommendation reach the human queue.
+    auto_decide: bool = False
     rules: list[RuleInput] = Field(min_length=1)
 
 
@@ -384,7 +387,7 @@ def create_campaign(
     authorize_workspace(principal, workspace_id, CAN_MANAGE_CAMPAIGNS)
     workspace = session.get(Workspace, workspace_id)
 
-    campaign = Campaign(workspace_id=workspace.id, name=payload.campaign_name)
+    campaign = Campaign(workspace_id=workspace.id, name=payload.campaign_name, auto_decide=payload.auto_decide)
     session.add(campaign)
     session.flush()
 
@@ -404,6 +407,23 @@ def create_campaign(
     )
     session.add(rule_set)
     session.flush()
+
+    if payload.auto_decide:
+        # Fully automated campaigns may not contain rules that structurally
+        # require a human: pretending a machine judged "feels authentic" would
+        # be fabricated judgement. Author measurable rules, or turn auto off.
+        blocked = [
+            r.requirement_text
+            for r in payload.rules
+            if r.rule_type is RuleType.subjective_human_review
+            or r.requires_human_review
+        ]
+        if blocked:
+            raise HTTPException(
+                422,
+                "auto_decide campaigns cannot include human-judgement rules: "
+                + "; ".join(blocked[:3]),
+            )
 
     for ordinal, rule_input in enumerate(payload.rules):
         session.add(

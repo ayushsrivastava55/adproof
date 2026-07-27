@@ -168,3 +168,12 @@ def test_state_after_maps_every_decision():
         SubmissionState.changes_requested
     )
     assert state_after(DecisionType.escalate) is SubmissionState.escalated
+
+
+def test_auto_mode_bounces_uncertainty_to_creator_never_to_a_verdict():
+    """Zero-human mode: no recommendation still terminates as request_changes,
+    never as approve or reject -- an unverified requirement is not a verdict."""
+    gate = adjudicate([rv(RuleResultState.uncertain)], processing_complete=True)
+    assert gate.recommendation is None
+    assert DecisionType.approve not in gate.permitted
+    assert DecisionType.reject not in gate.permitted
