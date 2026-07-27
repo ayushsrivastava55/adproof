@@ -8,7 +8,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=Geist+Mono:wght@400;500&display=swap" rel="stylesheet" />
-<link rel="stylesheet" href="/static/styles.css?v=10" />
+<link rel="stylesheet" href="/static/styles.css?v=11" />
 </head>
 <body>
 
@@ -180,8 +180,10 @@
     <h3>New submission</h3>
     <label>Campaign<select name="campaign_id" required></select></label>
     <label>Creator reference<input name="creator_reference" required placeholder="creator-001" /></label>
-    <label>Video URL (must be publicly fetchable by VideoDB)
-      <input name="source_url" type="url" required placeholder="https://…/video.mp4" /></label>
+    <label>Video file
+      <input name="file" type="file" accept="video/mp4,video/quicktime,.mp4,.mov,.m4v,.webm,.mkv" /></label>
+    <label>…or a video URL (must be publicly fetchable by VideoDB)
+      <input name="source_url" type="url" placeholder="https://…/video.mp4" /></label>
     <p class="note">
       Processing is metered by VideoDB. Visual indexing samples a frame every
       2 seconds, so cost and time scale with video length.
@@ -263,6 +265,6 @@
 </dialog>
 
 <script src="https://cdn.jsdelivr.net/npm/hls.js@1.5.17/dist/hls.min.js"></script>
-<script src="/static/app.js?v=10"></script>
+<script src="/static/app.js?v=11"></script>
 </body>
 </html>

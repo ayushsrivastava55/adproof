@@ -8,10 +8,12 @@ is stated in /api/integrity rather than stubbed.
 
 from __future__ import annotations
 
+import os
+import uuid
 from pathlib import Path
 from typing import Any, Literal
 
-from fastapi import Depends, FastAPI, HTTPException, Response
+from fastapi import Depends, FastAPI, File, Form, HTTPException, Response, UploadFile
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, model_validator
@@ -500,16 +502,18 @@ class SubmissionInput(BaseModel):
         return self
 
 
-@app.post("/api/submissions", status_code=201)
-def create_submission(
-    payload: SubmissionInput,
-    principal: Principal = Depends(current_principal),
-    session: Session = Depends(get_session),
+def _create_submission_core(
+    session: Session,
+    principal: Principal,
+    campaign: Campaign,
+    *,
+    creator_reference: str,
+    idempotency_key: str,
+    source_type: str,
+    source_url: str | None,
+    source_file_path: str | None,
 ) -> dict[str, Any]:
-    campaign = authorized_campaign(
-        session, principal, payload.campaign_id, CAN_SUBMIT
-    )
-
+    """Shared by the JSON (URL) and multipart (file) submission endpoints."""
     rule_set = session.scalar(
         select(RuleSetVersion)
         .where(
@@ -529,7 +533,7 @@ def create_submission(
     existing = session.scalar(
         select(Submission).where(
             Submission.workspace_id == campaign.workspace_id,
-            Submission.idempotency_key == payload.idempotency_key,
+            Submission.idempotency_key == idempotency_key,
         )
     )
     if existing:
@@ -549,9 +553,9 @@ def create_submission(
     submission = Submission(
         workspace_id=campaign.workspace_id,
         campaign_id=campaign.id,
-        creator_reference=payload.creator_reference,
+        creator_reference=creator_reference,
         state=SubmissionState.draft,
-        idempotency_key=payload.idempotency_key,
+        idempotency_key=idempotency_key,
     )
     session.add(submission)
     try:
@@ -564,9 +568,9 @@ def create_submission(
         submission_id=submission.id,
         version=1,
         rule_set_version_id=rule_set.id,
-        source_type=payload.source_type,
-        source_url=payload.source_url,
-        source_file_path=payload.source_file_path,
+        source_type=source_type,
+        source_url=source_url,
+        source_file_path=source_file_path,
         submitted_by=principal.user.email,
     )
     session.add(version)
@@ -593,6 +597,87 @@ def create_submission(
         "submission_version_id": version.id,
         "idempotent_replay": False,
     }
+
+
+@app.post("/api/submissions", status_code=201)
+def create_submission(
+    payload: SubmissionInput,
+    principal: Principal = Depends(current_principal),
+    session: Session = Depends(get_session),
+) -> dict[str, Any]:
+    campaign = authorized_campaign(
+        session, principal, payload.campaign_id, CAN_SUBMIT
+    )
+    return _create_submission_core(
+        session,
+        principal,
+        campaign,
+        creator_reference=payload.creator_reference,
+        idempotency_key=payload.idempotency_key,
+        source_type=payload.source_type,
+        source_url=payload.source_url,
+        source_file_path=payload.source_file_path,
+    )
+
+
+#: Where uploaded media lands before ingestion. The original file is retained
+#: as an audit artifact (PRODUCT_PRINCIPLES.md s11).
+UPLOAD_DIR = Path(
+    os.getenv("ADPROOF_UPLOAD_DIR", Path.home() / ".adproof" / "uploads")
+)
+_ALLOWED_VIDEO_SUFFIXES = {".mp4", ".mov", ".m4v", ".webm", ".mkv"}
+_MAX_UPLOAD_BYTES = 2 * 1024 * 1024 * 1024  # 2 GiB
+
+
+@app.post("/api/submissions/upload", status_code=201)
+def create_submission_from_file(
+    campaign_id: str = Form(...),
+    creator_reference: str = Form(...),
+    idempotency_key: str = Form(...),
+    file: UploadFile = File(...),
+    principal: Principal = Depends(current_principal),
+    session: Session = Depends(get_session),
+) -> dict[str, Any]:
+    """Submit a local video file directly from the browser.
+
+    The file is stored under a server-generated name (never the client's, which
+    is untrusted), then follows the identical path as a URL submission.
+    """
+    campaign = authorized_campaign(session, principal, campaign_id, CAN_SUBMIT)
+
+    suffix = Path(file.filename or "").suffix.lower()
+    if suffix not in _ALLOWED_VIDEO_SUFFIXES:
+        raise HTTPException(
+            422,
+            f"Unsupported file type {suffix or '(none)'}. Accepted: "
+            + ", ".join(sorted(_ALLOWED_VIDEO_SUFFIXES)),
+        )
+
+    UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+    dest = UPLOAD_DIR / f"{uuid.uuid4()}{suffix}"
+    written = 0
+    with dest.open("wb") as out:
+        while chunk := file.file.read(1024 * 1024):
+            written += len(chunk)
+            if written > _MAX_UPLOAD_BYTES:
+                out.close()
+                dest.unlink(missing_ok=True)
+                raise HTTPException(413, "File exceeds the 2 GiB upload limit.")
+            out.write(chunk)
+    if written == 0:
+        dest.unlink(missing_ok=True)
+        raise HTTPException(422, "Uploaded file is empty.")
+
+    return _create_submission_core(
+        session,
+        principal,
+        campaign,
+        creator_reference=creator_reference,
+        idempotency_key=idempotency_key,
+        source_type="upload",
+        source_url=None,
+        source_file_path=str(dest),
+    )
 
 
 @app.get("/api/submissions")

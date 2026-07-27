@@ -719,13 +719,41 @@ $("campaign-form").addEventListener("submit", async (e) => {
 $("submission-form").addEventListener("submit", async (e) => {
   e.preventDefault();
   const f = new FormData(e.target);
-  const body = {
-    campaign_id: f.get("campaign_id"),
-    creator_reference: f.get("creator_reference"),
-    source_url: f.get("source_url"),
-    idempotency_key: `ui-${Date.now()}-${Math.random().toString(36).slice(2)}`,
-  };
-  const res = await api("/api/submissions", { method: "POST", body: JSON.stringify(body) });
+  const file = f.get("file");
+  const url = f.get("source_url");
+  const err0 = $("submission-error");
+  if ((!file || !file.size) && !url) {
+    err0.textContent = "Choose a video file or provide a URL.";
+    err0.hidden = false;
+    return;
+  }
+  const idem = `ui-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  let res;
+  if (file && file.size) {
+    // Multipart upload. fetch directly: api() sets a JSON content-type, and
+    // multipart needs the browser to set its own boundary header.
+    const form = new FormData();
+    form.append("campaign_id", f.get("campaign_id"));
+    form.append("creator_reference", f.get("creator_reference"));
+    form.append("idempotency_key", idem);
+    form.append("file", file);
+    res = await fetch("/api/submissions/upload", {
+      method: "POST",
+      credentials: "same-origin",
+      body: form,
+    });
+    if (res.status === 401) { showLogin(); return; }
+  } else {
+    res = await api("/api/submissions", {
+      method: "POST",
+      body: JSON.stringify({
+        campaign_id: f.get("campaign_id"),
+        creator_reference: f.get("creator_reference"),
+        source_url: url,
+        idempotency_key: idem,
+      }),
+    });
+  }
   const err = $("submission-error");
   if (!res.ok) {
     err.textContent = (await res.json()).detail ?? "Could not create the submission.";
