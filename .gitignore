@@ -11,3 +11,4 @@ __pycache__/
 
 # Installed agent skills (third-party, not our source)
 .agents/
+skills-lock.json
